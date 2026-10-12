@@ -1,6 +1,8 @@
 # Step-by-step: Railway deploy (do these in order)
 
-## Prerequisites on this PC
+> **Cloud-only:** After deploy, the laptop can sleep/shut down. Scheduling, paper trading, and DB all run on Railway.
+
+## Prerequisites on this PC (setup only — not 24/7 runtime)
 
 - [x] Project code ready in `us-stock-agents`
 - [ ] Git installed

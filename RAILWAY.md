@@ -1,5 +1,11 @@
 # Deploy on Railway (24/7)
 
+## Cloud-only rule
+
+**Everything that must run 24/7 lives on Railway** (app, Postgres, optional n8n / Metabase / Redis / Telegram).  
+The office laptop is only for: edit code → push to GitHub → click Railway UI / set env vars.  
+Do **not** leave `python run.py --serve`, Docker Compose, or local cron running on the laptop for production.
+
 ## Recommended stack (from your templates)
 
 | Service | Template | Why |
