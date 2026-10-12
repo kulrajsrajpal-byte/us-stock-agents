@@ -1,0 +1,39 @@
+watchlist:
+  - SPY
+  - QQQ
+  - AAPL
+  - MSFT
+  - NVDA
+  - AMZN
+  - GOOGL
+  - META
+  - TSLA
+  - JPM
+
+market:
+  benchmark: SPY
+  history_days: 365
+
+scheduling:
+  # FastAPI APScheduler uses RUN_INTERVAL_MINUTES env (default 30)
+  sentiment_lookback_hours: 24
+
+
+reports:
+  directory: reports
+
+state:
+  directory: state
+
+paper_trading:
+  initial_cash: 100000
+  max_position_pct: 0.15
+  commission_bps: 5
+
+backtest:
+  fast_ma: 10
+  slow_ma: 30
+
+news_feeds:
+  - https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US
+  - https://www.investing.com/rss/news_25.rss
