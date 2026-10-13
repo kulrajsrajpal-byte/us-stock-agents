@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Generator
+from urllib.parse import unquote, urlparse
 
 from sqlalchemy import (
     JSON,
@@ -18,6 +21,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from us_stock_agents.settings import get_settings
+
+log = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -100,18 +105,43 @@ _engine = None
 _SessionLocal = None
 
 
+def _normalize_database_url(url: str) -> str:
+    # Railway often provides postgres:// — SQLAlchemy wants postgresql+psycopg://
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+psycopg://", 1)
+    if url.startswith("postgresql://") and "+psycopg" not in url:
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return url
+
+
+def _ensure_sqlite_parent(url: str) -> None:
+    if not url.startswith("sqlite"):
+        return
+    # sqlite:///./state/local.db or sqlite:////absolute/path.db
+    raw = url.split("sqlite:///", 1)[-1]
+    if raw == ":memory:" or not raw:
+        return
+    path = Path(unquote(raw))
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
 def get_engine():
     global _engine, _SessionLocal
     if _engine is None:
-        url = get_settings().database_url
-        # Railway often provides postgres:// — SQLAlchemy wants postgresql+psycopg://
-        if url.startswith("postgres://"):
-            url = url.replace("postgres://", "postgresql+psycopg://", 1)
-        elif url.startswith("postgresql://") and "+psycopg" not in url:
-            url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+        settings = get_settings()
+        url = _normalize_database_url(settings.database_url)
+        if "sqlite" in url and "postgres" not in url:
+            log.warning(
+                "Using SQLite (%s). On Railway you should attach PostgreSQL and set DATABASE_URL.",
+                url,
+            )
+            _ensure_sqlite_parent(url)
         connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
         _engine = create_engine(url, pool_pre_ping=True, connect_args=connect_args)
         _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False)
+        log.info("Database engine ready: %s", urlparse(url).scheme)
     return _engine
 
 

@@ -28,6 +28,14 @@ def _scheduled_job() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings = get_settings()
+    db = settings.database_url
+    scheme = db.split(":", 1)[0]
+    log.info("Starting with database scheme=%s", scheme)
+    if scheme.startswith("sqlite"):
+        log.error(
+            "DATABASE_URL is SQLite. On Railway, set DATABASE_URL from the Postgres "
+            "service (not localhost). Refusing fragile default will still try to start."
+        )
     init_db()
     scheduler.add_job(
         _scheduled_job,
@@ -67,6 +75,17 @@ def trigger_run(
     x_api_key: str | None = Header(default=None),
 ) -> dict[str, Any]:
     _check_api_key(x_api_key)
+    return run_cycle(force=force)
+
+
+@app.get("/run")
+def trigger_run_browser(
+    force: bool = True,
+    api_key: str | None = None,
+    x_api_key: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Same as POST /run — open this URL in a browser (no terminal needed)."""
+    _check_api_key(x_api_key or api_key)
     return run_cycle(force=force)
 
 

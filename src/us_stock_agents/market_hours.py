@@ -7,7 +7,12 @@ from us_stock_agents.settings import get_settings
 
 
 def is_us_regular_session(now: datetime | None = None) -> bool:
-    """True Mon–Fri 09:30–16:00 America/New_York (ignores exchange holidays)."""
+    """True Mon–Fri 09:30–16:00 America/New_York (ignores exchange holidays).
+
+    That open is ~7:00 PM IST when the US is on Eastern Daylight Time (EDT).
+    Automatic scheduler uses this window when MARKET_HOURS_ONLY=true.
+    Browser /run?force=true bypasses this check for testing anytime.
+    """
     settings = get_settings()
     tz = ZoneInfo(settings.timezone)
     now = now.astimezone(tz) if now else datetime.now(tz)

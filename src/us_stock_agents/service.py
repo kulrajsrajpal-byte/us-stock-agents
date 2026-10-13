@@ -6,6 +6,7 @@ from typing import Any
 from us_stock_agents.config import load_config
 from us_stock_agents.db import init_db, session_scope
 from us_stock_agents.evolution import StrategyEvolver
+from us_stock_agents.hermes import teach_hermes_cycle
 from us_stock_agents.market_hours import is_us_regular_session
 from us_stock_agents.notify import send_telegram
 from us_stock_agents.orchestrator import Orchestrator
@@ -52,6 +53,9 @@ def run_cycle(force: bool = False) -> dict[str, Any]:
             "trades": len(result.paper.trades_today),
             "lessons": result.paper.lessons,
         }
+
+    # Feed Hermes long-term memory (Railway) so future mutations learn from outcomes
+    payload["hermes_taught"] = teach_hermes_cycle(payload)
 
     text = (
         "US Stock Agents cycle\n"

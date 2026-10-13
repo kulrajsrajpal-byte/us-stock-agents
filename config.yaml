@@ -16,7 +16,11 @@ market:
 
 scheduling:
   # FastAPI APScheduler uses RUN_INTERVAL_MINUTES env (default 30)
+  # Market window is America/New_York 09:30–16:00 (≈ 7:00 PM–1:30 AM IST when US is on EDT)
   sentiment_lookback_hours: 24
+
+# Strategy baseline: MA crossover (no paid book required). See deploy/STRATEGY.md
+
 
 
 reports:

@@ -8,10 +8,13 @@ Four specialist agents + continuous paper trading that **mutates strategy parame
 |--------|------|
 | **FastAPI / Python / Docker** | This app — agents, scheduler, API |
 | **PostgreSQL** | Strategies, trades, mistakes, runs |
+| **Hermes Self Improving** | Learns from old strategies; suggests mutations |
 | **Redis** | Optional cache later |
 | **n8n** | Optional extra cron → `POST /run` |
 | **Telegram Bot** | Cycle + champion alerts |
 | **Metabase** | Equity / leaderboard dashboards |
+
+Hermes wiring: [`deploy/hermes.md`](./deploy/hermes.md).
 
 Full deploy steps: **[RAILWAY.md](./RAILWAY.md)**
 

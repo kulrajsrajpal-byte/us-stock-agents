@@ -1,8 +1,26 @@
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def resolve_database_url() -> str:
+    """Railway injects DATABASE_URL / DATABASE_PRIVATE_URL from Postgres.
+
+    Never silently ignore a Postgres URL; SQLite is local-only fallback.
+    """
+    for key in (
+        "DATABASE_URL",
+        "DATABASE_PRIVATE_URL",
+        "POSTGRES_URL",
+        "DATABASE_PUBLIC_URL",
+    ):
+        value = (os.getenv(key) or "").strip()
+        if value:
+            return value
+    return "sqlite:///./state/local.db"
 
 
 class Settings(BaseSettings):
@@ -11,8 +29,8 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    database_url: str
-
+    # Overridden in get_settings() from resolve_database_url() so Railway env always wins.
+    database_url: str = "sqlite:///./state/local.db"
     redis_url: str = ""
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
@@ -25,7 +43,12 @@ class Settings(BaseSettings):
     initial_cash: float = 100_000.0
     api_key: str = ""
 
+    hermes_enabled: bool = False
+    hermes_api_url: str = ""
+    hermes_api_key: str = ""
+    hermes_model: str = "default"
+
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    return Settings(database_url=resolve_database_url())

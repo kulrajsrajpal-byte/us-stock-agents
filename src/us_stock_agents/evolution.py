@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from us_stock_agents.db import StrategyRow, utcnow
+from us_stock_agents.db import MistakeRow, StrategyRow, utcnow
+from us_stock_agents.hermes import ask_hermes_for_strategy_patch
 from us_stock_agents.settings import get_settings
 
 
@@ -89,14 +90,44 @@ class StrategyEvolver:
         )
 
     def _spawn_mutant(self, session: Session, parent: StrategyRow, reason: str) -> StrategyRow:
-        # Explore nearby MA windows; bias toward slightly slower systems after losses
-        candidates_fast = [5, 8, 10, 12, 15, 20]
-        candidates_slow = [20, 25, 30, 40, 50, 60]
-        fast = random.choice(candidates_fast)
-        slow = random.choice([s for s in candidates_slow if s > fast + 5])
-        # Avoid cloning exact parent params when possible
-        if fast == parent.fast_ma and slow == parent.slow_ma:
-            slow = min(slow + 10, 80)
+        lessons = [
+            r.lesson
+            for r in session.scalars(
+                select(MistakeRow)
+                .where(MistakeRow.strategy_id == parent.id)
+                .order_by(MistakeRow.id.desc())
+                .limit(10)
+            ).all()
+        ]
+
+        # Prefer Hermes (Railway self-improving agent) when configured
+        hermes_patch = ask_hermes_for_strategy_patch(
+            parent_fast=parent.fast_ma,
+            parent_slow=parent.slow_ma,
+            paper_return_pct=parent.paper_return_pct,
+            trade_count=parent.trade_count or 0,
+            lessons=lessons,
+            reason=reason,
+        )
+
+        if hermes_patch:
+            fast = int(hermes_patch["fast_ma"])
+            slow = int(hermes_patch["slow_ma"])
+            source = "hermes"
+            notes = (
+                f"Hermes-mutated from v{parent.version} due to {reason}. "
+                f"{hermes_patch.get('rationale', '')}"
+            )
+        else:
+            # Fallback: random nearby MA windows
+            candidates_fast = [5, 8, 10, 12, 15, 20]
+            candidates_slow = [20, 25, 30, 40, 50, 60]
+            fast = random.choice(candidates_fast)
+            slow = random.choice([s for s in candidates_slow if s > fast + 5])
+            if fast == parent.fast_ma and slow == parent.slow_ma:
+                slow = min(slow + 10, 80)
+            source = "random"
+            notes = f"Mutated from v{parent.version} due to {reason}"
 
         now = utcnow()
         child = StrategyRow(
@@ -105,8 +136,14 @@ class StrategyEvolver:
             fast_ma=fast,
             slow_ma=slow,
             status="active",
-            params={"fast_ma": fast, "slow_ma": slow, "parent_id": parent.id, "reason": reason},
-            notes=f"Mutated from v{parent.version} due to {reason}",
+            params={
+                "fast_ma": fast,
+                "slow_ma": slow,
+                "parent_id": parent.id,
+                "reason": reason,
+                "source": source,
+            },
+            notes=notes[:1000],
             created_at=now,
             updated_at=now,
         )

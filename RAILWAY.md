@@ -2,7 +2,7 @@
 
 ## Cloud-only rule
 
-**Everything that must run 24/7 lives on Railway** (app, Postgres, optional n8n / Metabase / Redis / Telegram).  
+**Everything that must run 24/7 lives on Railway** (app, Postgres, Hermes, optional n8n / Metabase / Redis / Telegram).  
 The office laptop is only for: edit code → push to GitHub → click Railway UI / set env vars.  
 Do **not** leave `python run.py --serve`, Docker Compose, or local cron running on the laptop for production.
 
@@ -12,18 +12,23 @@ Do **not** leave `python run.py --serve`, Docker Compose, or local cron running 
 |---------|----------|-----|
 | **Trading brain** | **FastAPI / Python / Docker** (this repo) | Runs agents + paper trading + evolution loop |
 | **Database** | **PostgreSQL** | Durable strategies, trades, mistakes across restarts |
+| **Learning coach** | **Hermes / Hermes Self Improving agent** | Remembers past cycles; proposes smarter strategy mutations |
 | **Cache / locks** | **Redis** (optional) | Rate-limit market calls later |
 | **Scheduler / glue** | **n8n** | Extra cron + webhook orchestration |
 | **Alerts** | **Telegram Bot Python** (or BotFather token) | Push each cycle / champion events |
 | **Dashboards** | **Metabase** | Equity curves + strategy leaderboard |
 
-Skip for v1: LibreChat, Flowise, AnythingLLM, Hermes, Chatwoot, Kali, Laravel, Strapi — useful later, not required for paper-trade evolution.
+Hermes setup details: [`deploy/hermes.md`](./deploy/hermes.md).
+
+Skip for v1: LibreChat, Flowise, AnythingLLM, Chatwoot, Kali, Laravel, Strapi — useful later.
 
 ```mermaid
 flowchart TB
   n8n[n8n schedule] -->|POST /run| api[FastAPI service 24/7]
   api --> agents[Sentiment Activity Backtest Paper]
   agents --> pg[(PostgreSQL)]
+  api -->|teach + ask mutations| hermes[Hermes self-improving]
+  hermes --> api
   api --> tg[Telegram alerts]
   pg --> mb[Metabase dashboards]
   api -->|evolve| pg
