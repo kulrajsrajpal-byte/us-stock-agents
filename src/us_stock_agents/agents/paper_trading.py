@@ -126,6 +126,10 @@ class PaperTradingAgent:
             return "buy"
         if prev_f >= prev_s and f < s:
             return "sell"
+        if f > s:
+            return "buy"
+        if f < s:
+            return "sell"
         return "hold"
 
     def _evaluate_exit(self, trade: PaperTrade, lessons: list[str]) -> None:
