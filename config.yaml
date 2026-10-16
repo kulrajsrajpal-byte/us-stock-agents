@@ -9,6 +9,7 @@ watchlist:
   - META
   - TSLA
   - JPM
+  - MYE
 
 market:
   benchmark: SPY
