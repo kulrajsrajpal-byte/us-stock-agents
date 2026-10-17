@@ -77,6 +77,7 @@ class PaperTrade:
     qty: float
     price: float
     reason: str
+    pnl_pct: float | None = None
 
 
 @dataclass

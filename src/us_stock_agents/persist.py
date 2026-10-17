@@ -70,6 +70,7 @@ def sync_strategy_from_pipeline(
                 qty=t.qty,
                 price=t.price,
                 reason=t.reason,
+                pnl_pct=t.pnl_pct,
                 created_at=t.timestamp,
             )
         )
