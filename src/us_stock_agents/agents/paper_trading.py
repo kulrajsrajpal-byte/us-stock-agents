@@ -165,19 +165,38 @@ class PaperTradingAgent:
                 }
             )
 
-    def _load_portfolio(self, strategy_version: int, strategy_id: int | None) -> dict:
+    def _load_portfolio(
+        self,
+        strategy_version: int,
+        strategy_id: int | None,
+    ) -> dict:
         fresh = {
             "cash": self.cfg.initial_cash,
             "positions": {},
             "strategy_version": strategy_version,
             "strategy_id": strategy_id,
         }
+
         if not self.portfolio_path.exists():
             return fresh
-        data = json.loads(self.portfolio_path.read_text(encoding="utf-8"))
-        # New mutated strategy → reset paper book so results are comparable
-        if data.get("strategy_version") != strategy_version or data.get("strategy_id") != strategy_id:
+
+        try:
+            data = json.loads(
+                self.portfolio_path.read_text(encoding="utf-8")
+            )
+        except (json.JSONDecodeError, OSError, TypeError):
             return fresh
+
+        # Preserve cash and open positions when the strategy mutates.
+        # Otherwise existing positions are forgotten before they can be sold.
+        data.setdefault("cash", self.cfg.initial_cash)
+        data.setdefault("positions", {})
+
+        # Record which strategy currently manages the portfolio,
+        # without deleting positions opened by an earlier version.
+        data["strategy_version"] = strategy_version
+        data["strategy_id"] = strategy_id
+
         return data
 
     def _save_portfolio(self, portfolio: dict) -> None:
