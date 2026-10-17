@@ -8,7 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, Header, HTTPException
 from sqlalchemy import desc, select
 
-from us_stock_agents.db import RunRow, StrategyRow, init_db, session_scope
+from us_stock_agents.db import RunRow, StrategyRow, TradeRow, init_db, session_scope
 from us_stock_agents.service import run_cycle
 from us_stock_agents.settings import get_settings
 
@@ -156,6 +156,35 @@ def list_strategies(limit: int = 50) -> list[dict[str, Any]]:
                 "trade_count": r.trade_count,
                 "is_champion": r.is_champion,
                 "notes": r.notes,
+            }
+            for r in rows
+        ]
+@app.get("/trades")
+def list_trades(limit: int = 50) -> list[dict[str, Any]]:
+    init_db()
+
+    with session_scope() as session:
+        rows = session.scalars(
+            select(TradeRow)
+            .order_by(desc(TradeRow.id))
+            .limit(limit)
+        ).all()
+
+        return [
+            {
+                "id": r.id,
+                "strategy_id": r.strategy_id,
+                "symbol": r.symbol,
+                "side": r.side,
+                "qty": r.qty,
+                "price": r.price,
+                "reason": r.reason,
+                "pnl_pct": r.pnl_pct,
+                "created_at": (
+                    r.created_at.isoformat()
+                    if r.created_at
+                    else None
+                ),
             }
             for r in rows
         ]
