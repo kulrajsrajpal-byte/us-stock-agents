@@ -18,6 +18,9 @@ from us_stock_agents.models import (
 class PaperTradingAgent:
     """Simulates trades, journals outcomes, and records lessons for the next run."""
 
+    STOP_LOSS_PCT = 0.05
+    TAKE_PROFIT_PCT = 0.10
+
     def __init__(self, cfg: AppConfig, memory: SharedMemory) -> None:
         self.cfg = cfg
         self.memory = memory
