@@ -41,7 +41,19 @@ class PaperTradingAgent:
             if price is None:
                 continue
 
-            pos = float(portfolio["positions"].get(symbol, 0))
+            position_data = portfolio["positions"].get(symbol, 0)
+
+            if isinstance(position_data, dict):
+                pos = float(position_data.get("qty", 0))
+                entry_price = position_data.get("entry_price")
+                if entry_price is not None:
+                    entry_price = float(entry_price)
+            else:
+                # Backward compatibility with existing positions
+                # that only contain a numeric quantity.
+                pos = float(position_data or 0)
+                entry_price = None
+
             cash = float(portfolio["cash"])
 
             if signal == "buy" and pos == 0:
@@ -53,7 +65,13 @@ class PaperTradingAgent:
                 if cost > cash:
                     continue
                 portfolio["cash"] = cash - cost
-                portfolio["positions"][symbol] = qty
+                portfolio["positions"][symbol] = {
+                    "qty": qty,
+                    "entry_price": price,
+                    "opened_at": datetime.now(timezone.utc).isoformat(),
+                    "entry_strategy_version": strategy.version,
+                    "entry_strategy_id": strategy.strategy_id,
+                }
                 trade = PaperTrade(
                     timestamp=datetime.now(timezone.utc),
                     symbol=symbol,
@@ -91,10 +109,16 @@ class PaperTradingAgent:
                 self._evaluate_exit(trade, lessons)
 
         equity = float(portfolio["cash"])
-        for sym, qty in portfolio["positions"].items():
-            px = last_close(prices, sym)
-            if px is not None:
-                equity += qty * px
+        for sym, position_data in portfolio["positions"].items():
+           if isinstance(position_data, dict):
+           qty = float(position_data.get("qty", 0))
+           else:
+           qty = float(position_data or 0)
+ 
+           px = last_close(prices, sym)
+ 
+           if px is not None:
+           equity += qty * px
 
         strategy.last_paper_equity = equity
         self.memory.save_strategy(strategy)
@@ -109,7 +133,19 @@ class PaperTradingAgent:
             generated_at=datetime.now(timezone.utc),
             cash=round(float(portfolio["cash"]), 2),
             equity=round(equity, 2),
-            positions={k: v for k, v in portfolio["positions"].items() if v},
+            positions={
+                symbol: (
+                    float(position_data.get("qty", 0))
+                    if isinstance(position_data, dict)
+                    else float(position_data or 0)
+                )
+                for symbol, position_data in portfolio["positions"].items()
+                if (
+                    float(position_data.get("qty", 0))
+                    if isinstance(position_data, dict)
+                    else float(position_data or 0)
+                ) > 0
+            },
             trades_today=trades,
             lessons=lessons,
             strategy_version=strategy.version,
