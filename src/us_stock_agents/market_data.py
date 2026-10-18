@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 import httpx
@@ -9,13 +8,11 @@ import pandas as pd
 
 log = logging.getLogger(__name__)
 
-_PER_SYMBOL_TIMEOUT_SEC = 6.0
-_BATCH_TIMEOUT_SEC = 25
-_MAX_WORKERS = 8
+_PER_SYMBOL_TIMEOUT_SEC = 4.0
 _UA = "Mozilla/5.0 (compatible; us-stock-agents/1.0)"
 
 
-def _fetch_yahoo_chart(symbol: str, days: int) -> tuple[str, pd.DataFrame | None]:
+def _fetch_yahoo_chart(symbol: str, days: int) -> pd.DataFrame | None:
     range_str = "3mo" if days <= 100 else "6mo"
     url = (
         f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
@@ -31,38 +28,24 @@ def _fetch_yahoo_chart(symbol: str, days: int) -> tuple[str, pd.DataFrame | None
         quote = (result.get("indicators") or {}).get("quote") or [{}]
         closes = quote[0].get("close") or []
         if not ts or not closes:
-            return symbol, None
+            return None
         idx = pd.to_datetime(ts, unit="s", utc=True)
         df = pd.DataFrame({"close": closes}, index=idx).dropna()
-        if df.empty:
-            return symbol, None
-        return symbol, df
+        return None if df.empty else df
     except Exception as exc:  # noqa: BLE001
         log.warning("price fetch failed for %s: %s", symbol, exc)
-        return symbol, None
+        return None
 
 
 def fetch_history(symbols: list[str], days: int) -> dict[str, pd.DataFrame]:
-    uniq = list(dict.fromkeys(symbols))[:10]
-    if not uniq:
-        return {}
-    days = min(int(days), 120)
+    """Sequential fetches — avoids nested ThreadPool deadlocks under uvicorn."""
+    uniq = list(dict.fromkeys(symbols))[:8]
+    days = min(int(days), 90)
     out: dict[str, pd.DataFrame] = {}
-    pool = ThreadPoolExecutor(max_workers=_MAX_WORKERS)
-    try:
-        futs = {pool.submit(_fetch_yahoo_chart, sym, days): sym for sym in uniq}
-        try:
-            for fut in as_completed(futs, timeout=_BATCH_TIMEOUT_SEC):
-                try:
-                    sym, df = fut.result()
-                    if df is not None:
-                        out[sym] = df
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("future failed: %s", exc)
-        except TimeoutError:
-            log.warning("price batch timed out with %s/%s symbols", len(out), len(uniq))
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
+    for sym in uniq:
+        df = _fetch_yahoo_chart(sym, days)
+        if df is not None:
+            out[sym] = df
     log.info("Fetched prices for %s/%s symbols", len(out), len(uniq))
     return out
 

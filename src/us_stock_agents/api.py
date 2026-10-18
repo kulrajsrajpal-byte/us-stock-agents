@@ -71,8 +71,8 @@ def health() -> dict[str, Any]:
     settings = get_settings()
     return {
         "status": "ok",
-        "version": "0.3.1",
-        "market_data": "yahoo_http",
+        "version": "0.3.2",
+        "market_data": "yahoo_http_sequential",
         "run_interval_minutes": settings.run_interval_minutes,
         "market_hours_only": settings.market_hours_only,
         "continue_until_profit": settings.continue_until_profit,
