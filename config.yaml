@@ -23,9 +23,9 @@ market:
   benchmark: SPY
   history_days: 120
   # How many rotating universe symbols to price each cycle
-  scan_batch_size: 8
+  scan_batch_size: 4
   # Max symbols after merge (impacted + held + batch) to backtest/trade
-  trade_universe_limit: 8
+  trade_universe_limit: 4
   # Use full US_LIQUID_UNIVERSE scanner (true) or watchlist only (false)
   use_full_us_universe: true
 

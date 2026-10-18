@@ -85,7 +85,7 @@ def health() -> dict[str, Any]:
 async def _run_with_budget(force: bool) -> dict[str, Any]:
     """Keep the event loop free so /health works while a cycle runs."""
     try:
-        return await asyncio.wait_for(asyncio.to_thread(run_cycle, force), timeout=40)
+        return await asyncio.wait_for(asyncio.to_thread(run_cycle, force), timeout=55)
     except TimeoutError:
         return {
             "skipped": True,
