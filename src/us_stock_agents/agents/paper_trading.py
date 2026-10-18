@@ -391,27 +391,32 @@ class PaperTradingAgent:
             except (json.JSONDecodeError, OSError, TypeError):
                 data = None
 
-        has_open = bool(
+        # New strategy version / id → fresh $100k book (do not inherit stacked lots).
+        same_strategy = bool(
             data
+            and strategy_id is not None
+            and data.get("strategy_id") == strategy_id
+        )
+        has_open = bool(
+            same_strategy
             and any(self._position_qty(v) > 0 for v in (data.get("positions") or {}).values())
         )
 
-        # Railway: restore open lots from durable Postgres trades when local file empty.
+        # Railway: restore only this strategy's lots from durable Postgres trades.
         if not has_open:
-            hydrated = reconstruct_positions_from_trades()
-            if hydrated and hydrated.get("positions"):
-                open_cost = sum(
-                    self._position_qty(pos) * float(pos.get("entry_price") or 0)
-                    for pos in hydrated["positions"].values()
-                    if isinstance(pos, dict)
-                )
+            hydrated = reconstruct_positions_from_trades(strategy_id=strategy_id)
+            if hydrated is not None:
                 data = {
-                    "cash": round(max(self.cfg.initial_cash - open_cost, 0.0), 2),
-                    "positions": hydrated["positions"],
-                    "hydrated_from": "postgres_trades",
+                    "cash": float(hydrated.get("cash", self.cfg.initial_cash)),
+                    "positions": hydrated.get("positions") or {},
+                    "hydrated_from": hydrated.get("hydrated_from", "postgres_trades"),
                 }
 
-        if not data:
+        if not data or not same_strategy:
+            if data and data.get("hydrated_from"):
+                data["strategy_version"] = strategy_version
+                data["strategy_id"] = strategy_id
+                return data
             return fresh
 
         data.setdefault("cash", self.cfg.initial_cash)

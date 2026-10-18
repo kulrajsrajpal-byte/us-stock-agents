@@ -11,20 +11,28 @@ from us_stock_agents.settings import get_settings
 log = logging.getLogger(__name__)
 
 
-def reconstruct_positions_from_trades() -> dict[str, Any] | None:
+def reconstruct_positions_from_trades(
+    strategy_id: int | None = None,
+) -> dict[str, Any] | None:
     """Rebuild open paper lots from Postgres trade history (BUY − SELL).
 
-    Railway containers often lose portfolio.json; trades in Postgres are durable.
-    Returns None if DB unavailable or no trades exist.
+    When strategy_id is set, only that strategy's trades are used so each
+    mutant starts from a clean book instead of stacking every historical buy.
     """
     try:
         init_db()
         with session_scope() as session:
-            rows = session.scalars(select(TradeRow).order_by(TradeRow.id.asc())).all()
+            stmt = select(TradeRow).order_by(TradeRow.id.asc())
+            if strategy_id is not None:
+                stmt = stmt.where(TradeRow.strategy_id == strategy_id)
+            rows = session.scalars(stmt).all()
             if not rows:
-                return None
+                return {
+                    "cash": float(get_settings().initial_cash),
+                    "positions": {},
+                    "hydrated_from": "trades_empty",
+                }
 
-            # FIFO lots per symbol: list of {qty, entry_price, opened_at, ...}
             lots: dict[str, list[dict[str, Any]]] = {}
             cash = float(get_settings().initial_cash)
 
@@ -38,7 +46,16 @@ def reconstruct_positions_from_trades() -> dict[str, Any] | None:
                     continue
 
                 if side == "buy":
-                    cash -= qty * price
+                    cost = qty * price
+                    # Never allow ledger cash to go deeply negative from bad history;
+                    # clamp buys that exceed cash (defensive).
+                    if cost > cash + 1e-6:
+                        affordable = cash / price
+                        if affordable * price < 100:
+                            continue
+                        qty = affordable
+                        cost = qty * price
+                    cash -= cost
                     lots[sym].append(
                         {
                             "qty": qty,
@@ -49,8 +66,7 @@ def reconstruct_positions_from_trades() -> dict[str, Any] | None:
                     )
                 elif side == "sell":
                     remaining = qty
-                    proceeds = qty * price
-                    cash += proceeds
+                    cash += qty * price
                     while remaining > 1e-9 and lots[sym]:
                         lot = lots[sym][0]
                         take = min(lot["qty"], remaining)
@@ -65,7 +81,6 @@ def reconstruct_positions_from_trades() -> dict[str, Any] | None:
                 if not open_lots:
                     continue
                 total_qty = sum(lot["qty"] for lot in open_lots)
-                # VWAP entry across remaining lots
                 entry = sum(lot["qty"] * lot["entry_price"] for lot in open_lots) / total_qty
                 latest = open_lots[-1]
                 positions[sym] = {
