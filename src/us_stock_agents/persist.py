@@ -75,7 +75,29 @@ def sync_strategy_from_pipeline(
             )
         )
 
+    # Prefer structured losing SELLs for mistake evidence (symbol + pnl).
+    for t in result.paper.trades_today:
+        if t.side == "sell" and t.pnl_pct is not None and t.pnl_pct < 0:
+            session.add(
+                MistakeRow(
+                    strategy_id=strategy.id,
+                    symbol=t.symbol,
+                    pnl_pct=float(t.pnl_pct),
+                    lesson=next(
+                        (lesson for lesson in lessons if t.symbol in lesson),
+                        t.reason,
+                    ),
+                    created_at=t.timestamp,
+                )
+            )
+
     for lesson in lessons:
+        # Skip duplicates already stored from negative SELLs above.
+        if any(
+            t.side == "sell" and t.pnl_pct is not None and t.pnl_pct < 0 and t.symbol in lesson
+            for t in result.paper.trades_today
+        ):
+            continue
         session.add(
             MistakeRow(
                 strategy_id=strategy.id,
