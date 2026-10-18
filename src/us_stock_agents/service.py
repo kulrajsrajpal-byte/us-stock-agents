@@ -41,20 +41,22 @@ def run_cycle(force: bool = False) -> dict[str, Any]:
             "hermes": hermes_status(),
         }
 
+    pool = ThreadPoolExecutor(max_workers=1)
     try:
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            fut = pool.submit(_run_cycle_locked, force, settings)
-            try:
-                return fut.result(timeout=_CYCLE_WALL_TIMEOUT_SEC)
-            except FuturesTimeout:
-                log.error("Cycle exceeded %ss wall timeout", _CYCLE_WALL_TIMEOUT_SEC)
-                return {
-                    "skipped": True,
-                    "reason": "cycle_timeout",
-                    "coach": coach_status(),
-                    "hermes": hermes_status(),
-                }
+        fut = pool.submit(_run_cycle_locked, force, settings)
+        try:
+            return fut.result(timeout=_CYCLE_WALL_TIMEOUT_SEC)
+        except FuturesTimeout:
+            log.error("Cycle exceeded %ss wall timeout", _CYCLE_WALL_TIMEOUT_SEC)
+            return {
+                "skipped": True,
+                "reason": "cycle_timeout",
+                "coach": coach_status(),
+                "hermes": hermes_status(),
+            }
     finally:
+        # Do not wait for a hung worker — that previously kept the lock forever.
+        pool.shutdown(wait=False, cancel_futures=True)
         _cycle_lock.release()
 
 
