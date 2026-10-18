@@ -34,11 +34,9 @@ class Settings(BaseSettings):
     redis_url: str = ""
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
-    # Run often on Railway; paper + coach keep iterating 24x7.
+    # 24x7 paper + coach (enforced in get_settings if old Railway env still set)
     run_interval_minutes: int = 15
-    # False = keep scanning/evolving overnight (paper only).
     market_hours_only: bool = False
-    # Skip RSS sentiment (use neutral) so cycles finish under wall timeout.
     skip_sentiment: bool = True
     timezone: str = "America/New_York"
     profit_target_pct: float = 5.0
@@ -51,14 +49,22 @@ class Settings(BaseSettings):
     hermes_api_url: str = ""
     hermes_api_key: str = ""
     hermes_model: str = "default"
-    # Built-in Postgres learner (no external Hermes login required)
     local_coach_enabled: bool = True
-    # Keep mutating/consulting until a champion hits PROFIT_TARGET_PCT
     continue_until_profit: bool = True
-    # Also consult when return is near-flat after enough trades
     hermes_flat_band_pct: float = 1.0
 
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings(database_url=resolve_database_url())
+    """Load settings, then enforce the continuous paper-trading loop.
+
+    Old Railway vars (MARKET_HOURS_ONLY=true, RUN_INTERVAL_MINUTES=30) used to
+    override defaults and pause overnight. We force the 24x7 coach profile here.
+    """
+    settings = Settings(database_url=resolve_database_url())
+    settings.run_interval_minutes = 15
+    settings.market_hours_only = False
+    settings.skip_sentiment = True
+    settings.continue_until_profit = True
+    settings.local_coach_enabled = True
+    return settings

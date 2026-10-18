@@ -46,8 +46,10 @@ flowchart TB
 Copy from `.env.example`. Minimum:
 
 - `DATABASE_URL` — auto from Postgres plugin
-- `RUN_INTERVAL_MINUTES=30`
-- `MARKET_HOURS_ONLY=true`
+- `RUN_INTERVAL_MINUTES=15`
+- `MARKET_HOURS_ONLY=false`
+- `SKIP_SENTIMENT=true`
+- `CONTINUE_UNTIL_PROFIT=true`
 - `PROFIT_TARGET_PCT=5`
 - `MAX_DRAWDOWN_PCT=10`
 - `CHAMPION_MIN_TRADES=5`
