@@ -98,6 +98,15 @@ def trigger_run_browser(
     return run_cycle(force=force)
 
 
+@app.get("/run/lite")
+def trigger_run_lite(
+    x_api_key: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Faster cycle: force=True, always skip market-hours gate."""
+    _check_api_key(x_api_key)
+    return run_cycle(force=True)
+
+
 @app.get("/status")
 def status() -> dict[str, Any]:
     init_db()

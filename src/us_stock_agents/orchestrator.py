@@ -81,7 +81,21 @@ class Orchestrator:
             limit=self.cfg.trade_universe_limit,
         )
 
+    def _neutral(self, note: str) -> SentimentReport:
+        return SentimentReport(
+            generated_at=datetime.now(timezone.utc),
+            overall_label="neutral",
+            overall_score=0.0,
+            headline_count=0,
+            bullish_pct=0.0,
+            bearish_pct=0.0,
+            neutral_pct=100.0,
+            notes=note,
+        )
+
     def _run_sentiment_fast(self) -> SentimentReport:
+        if get_settings().skip_sentiment:
+            return self._neutral("Sentiment skipped (SKIP_SENTIMENT=true); trading continues.")
         pool = ThreadPoolExecutor(max_workers=1)
         try:
             fut = pool.submit(self.sentiment_agent.run)
@@ -89,15 +103,6 @@ class Orchestrator:
                 return fut.result(timeout=_SENTIMENT_TIMEOUT_SEC)
             except FuturesTimeout:
                 log.warning("Sentiment timed out; using neutral fallback")
-                return SentimentReport(
-                    generated_at=datetime.now(timezone.utc),
-                    overall_label="neutral",
-                    overall_score=0.0,
-                    headline_count=0,
-                    bullish_pct=0.0,
-                    bearish_pct=0.0,
-                    neutral_pct=100.0,
-                    notes="Sentiment skipped after timeout; trading continues.",
-                )
+                return self._neutral("Sentiment skipped after timeout; trading continues.")
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
