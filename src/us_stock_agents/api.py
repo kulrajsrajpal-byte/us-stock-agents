@@ -56,7 +56,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="US Stock Multi-Agent",
     description="24/7 paper trading + strategy evolution on Railway",
-    version="0.3.6",
+    version="0.3.7",
     lifespan=lifespan,
 )
 
@@ -72,8 +72,8 @@ def health() -> dict[str, Any]:
     settings = get_settings()
     return {
         "status": "ok",
-        "version": "0.3.6",
-        "market_data": "stooq",
+        "version": "0.3.7",
+        "market_data": "stooq_cache_seed",
         "run_interval_minutes": settings.run_interval_minutes,
         "market_hours_only": settings.market_hours_only,
         "continue_until_profit": settings.continue_until_profit,
@@ -85,7 +85,7 @@ def health() -> dict[str, Any]:
 async def _run_with_budget(force: bool) -> dict[str, Any]:
     """Keep the event loop free so /health works while a cycle runs."""
     try:
-        return await asyncio.wait_for(asyncio.to_thread(run_cycle, force), timeout=55)
+        return await asyncio.wait_for(asyncio.to_thread(run_cycle, force), timeout=90)
     except TimeoutError:
         return {
             "skipped": True,

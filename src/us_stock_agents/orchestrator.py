@@ -1,68 +1,47 @@
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from datetime import datetime, timezone
 
-from us_stock_agents.agents import (
-    ActivityAgent,
-    BacktestAgent,
-    PaperTradingAgent,
-    SentimentAgent,
-)
+from us_stock_agents.agents import ActivityAgent, BacktestAgent, PaperTradingAgent
 from us_stock_agents.config import AppConfig, ensure_dirs
 from us_stock_agents.market_data import fetch_history
 from us_stock_agents.memory import SharedMemory
 from us_stock_agents.models import ActivityReport, PipelineResult, SentimentReport
-from us_stock_agents.reporting import write_report
-from us_stock_agents.settings import get_settings
 from us_stock_agents.universe import merge_priority, rotate_batch
 
 log = logging.getLogger(__name__)
-_SENTIMENT_TIMEOUT_SEC = 12
 
 
 class Orchestrator:
-    """Runs specialist agents in sequence and writes per-agent reports."""
+    """Runs specialist agents in sequence (reports optional — skip for speed)."""
 
     def __init__(self, cfg: AppConfig) -> None:
         self.cfg = cfg
         ensure_dirs(cfg)
         self.memory = SharedMemory(cfg.state_dir)
-        self.sentiment_agent = SentimentAgent(cfg)
         self.activity_agent = ActivityAgent(cfg)
         self.backtest_agent = BacktestAgent(cfg, self.memory)
         self.paper_agent = PaperTradingAgent(cfg, self.memory)
 
     def run_pipeline(self) -> PipelineResult:
-        sentiment = self._run_sentiment_fast()
-        write_report(self.cfg.reports_dir, "sentiment", sentiment)
-
+        sentiment = self._neutral("Sentiment skipped; 24x7 trading continues.")
         activity = self.activity_agent.run(sentiment)
-        write_report(self.cfg.reports_dir, "activity", activity)
 
-        # One shared price download for backtest + paper (halves network time).
         symbols = self._scan_symbols(activity)
+        # Always returns quickly via cache/seed even if Stooq is blocked.
         prices = fetch_history(symbols, self.cfg.history_days)
 
         backtest = self.backtest_agent.run(sentiment, activity, prices=prices)
-        write_report(self.cfg.reports_dir, "backtest", backtest)
-
         paper = self.paper_agent.run(backtest, activity, prices=prices)
-        write_report(self.cfg.reports_dir, "paper_trading", paper)
 
-        write_report(self.cfg.reports_dir, "pipeline_summary", {
-            "sentiment_label": sentiment.overall_label,
-            "sentiment_score": sentiment.overall_score,
-            "themes": activity.themes,
-            "impacted": [t.symbol for t in activity.impacted],
-            "scanned": symbols,
-            "backtest_return_pct": backtest.aggregate_return_pct,
-            "recommended": backtest.recommended_symbols,
-            "paper_equity": paper.equity,
-            "lessons": paper.lessons,
-        })
-
+        log.info(
+            "Pipeline done scanned=%s recommended=%s equity=%s trades=%s",
+            symbols,
+            backtest.recommended_symbols,
+            paper.equity,
+            len(paper.trades_today),
+        )
         return PipelineResult(
             sentiment=sentiment,
             activity=activity,
@@ -71,14 +50,16 @@ class Orchestrator:
         )
 
     def _scan_symbols(self, activity: ActivityReport) -> list[str]:
+        # Keep core liquid names every cycle so we always have tradeable names.
+        core = ["SPY", "QQQ", "AAPL", "GOOGL", "XOM", "GLD"]
         batch = rotate_batch(self.cfg.universe, self.cfg.scan_batch_size)
-        batch = list(dict.fromkeys([*self.cfg.watchlist, *batch]))
+        batch = list(dict.fromkeys([*core, *self.cfg.watchlist, *batch]))
         impacted = [t.symbol for t in activity.impacted]
         return merge_priority(
             batch=batch,
             impacted=impacted,
             held=[],
-            limit=self.cfg.trade_universe_limit,
+            limit=min(6, self.cfg.trade_universe_limit),
         )
 
     def _neutral(self, note: str) -> SentimentReport:
@@ -92,17 +73,3 @@ class Orchestrator:
             neutral_pct=100.0,
             notes=note,
         )
-
-    def _run_sentiment_fast(self) -> SentimentReport:
-        if get_settings().skip_sentiment:
-            return self._neutral("Sentiment skipped (SKIP_SENTIMENT=true); trading continues.")
-        pool = ThreadPoolExecutor(max_workers=1)
-        try:
-            fut = pool.submit(self.sentiment_agent.run)
-            try:
-                return fut.result(timeout=_SENTIMENT_TIMEOUT_SEC)
-            except FuturesTimeout:
-                log.warning("Sentiment timed out; using neutral fallback")
-                return self._neutral("Sentiment skipped after timeout; trading continues.")
-        finally:
-            pool.shutdown(wait=False, cancel_futures=True)
