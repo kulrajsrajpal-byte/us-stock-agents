@@ -1,6 +1,9 @@
+# Broad US liquid universe is loaded from us_stock_agents.universe (100+ names).
+# This watchlist is the always-on core; the scanner rotates the rest 24x7.
 watchlist:
   - SPY
   - QQQ
+  - IWM
   - AAPL
   - MSFT
   - NVDA
@@ -8,21 +11,26 @@ watchlist:
   - GOOGL
   - META
   - TSLA
+  - XOM
+  - CVX
+  - GLD
+  - FCX
   - JPM
-  - MYE
+  - XLE
+  - XLK
 
 market:
   benchmark: SPY
-  history_days: 365
+  history_days: 120
+  # How many rotating universe symbols to price each cycle
+  scan_batch_size: 25
+  # Max symbols after merge (impacted + held + batch) to backtest/trade
+  trade_universe_limit: 20
+  # Use full US_LIQUID_UNIVERSE scanner (true) or watchlist only (false)
+  use_full_us_universe: true
 
 scheduling:
-  # FastAPI APScheduler uses RUN_INTERVAL_MINUTES env (default 30)
-  # Market window is America/New_York 09:30–16:00 (≈ 7:00 PM–1:30 AM IST when US is on EDT)
   sentiment_lookback_hours: 24
-
-# Strategy baseline: MA crossover (no paid book required). See deploy/STRATEGY.md
-
-
 
 reports:
   directory: reports
@@ -32,7 +40,7 @@ state:
 
 paper_trading:
   initial_cash: 100000
-  max_position_pct: 0.15
+  max_position_pct: 0.12
   commission_bps: 5
 
 backtest:

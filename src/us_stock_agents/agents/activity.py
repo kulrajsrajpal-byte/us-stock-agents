@@ -63,9 +63,21 @@ class ActivityAgent:
             "JPM": ["jpmorgan", "jp morgan", "bank"],
             "SPY": ["s&p", "sp500", "broad market"],
             "QQQ": ["nasdaq", "tech stocks"],
+            "XOM": ["exxon", "oil", "crude"],
+            "CVX": ["chevron", "oil", "crude"],
+            "XLE": ["energy sector", "oil", "opec"],
+            "USO": ["crude oil", "oil etf"],
+            "GLD": ["gold", "bullion"],
+            "SLV": ["silver"],
+            "GDX": ["gold miner", "gold mining"],
+            "FCX": ["copper", "freeport"],
+            "NEM": ["newmont", "gold"],
+            "COP": ["conocophillips", "oil"],
+            "SLB": ["schlumberger", "oilfield"],
         }
 
-        for symbol in self.cfg.watchlist:
+        symbols = list(dict.fromkeys([*self.cfg.watchlist, *getattr(self.cfg, "universe", [])]))
+        for symbol in symbols:
             reasons: list[str] = []
             relevance = 0.0
 

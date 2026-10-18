@@ -67,8 +67,15 @@ def _check_api_key(x_api_key: str | None) -> None:
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict[str, Any]:
+    settings = get_settings()
+    return {
+        "status": "ok",
+        "run_interval_minutes": settings.run_interval_minutes,
+        "market_hours_only": settings.market_hours_only,
+        "continue_until_profit": settings.continue_until_profit,
+        "local_coach": True,
+    }
 
 
 @app.post("/run")

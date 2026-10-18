@@ -9,6 +9,7 @@ from us_stock_agents.config import AppConfig
 from us_stock_agents.market_data import fetch_history
 from us_stock_agents.memory import SharedMemory, StrategyState
 from us_stock_agents.models import ActivityReport, BacktestMetrics, BacktestReport, SentimentReport
+from us_stock_agents.universe import merge_priority, rotate_batch
 
 
 class BacktestAgent:
@@ -52,7 +53,10 @@ class BacktestAgent:
 
         aggregate = float(np.mean([m.return_pct for m in per_symbol]))
         ranked = sorted(per_symbol, key=lambda m: m.sharpe, reverse=True)
-        recommended = [m.symbol for m in ranked[:3]]
+        # Trade the strongest signals from this scan batch (up to 5).
+        recommended = [m.symbol for m in ranked if m.return_pct > 0 and m.sharpe > 0][:5]
+        if not recommended:
+            recommended = [m.symbol for m in ranked[:3]]
 
         old_fast, old_slow = strategy.fast_ma, strategy.slow_ma
         suggestion = self._suggest_params(strategy, per_symbol, sentiment)
@@ -76,12 +80,16 @@ class BacktestAgent:
         )
 
     def _priority_symbols(self, activity: ActivityReport | None) -> list[str]:
-        base = list(dict.fromkeys(self.cfg.watchlist))
-        if not activity:
-            return base
-        impacted = [t.symbol for t in activity.impacted]
-        merged = impacted + [s for s in base if s not in impacted]
-        return merged[:12]
+        batch = rotate_batch(self.cfg.universe, self.cfg.scan_batch_size)
+        # Always include core watchlist so mega-caps stay in play.
+        batch = list(dict.fromkeys([*self.cfg.watchlist, *batch]))
+        impacted = [t.symbol for t in activity.impacted] if activity else []
+        return merge_priority(
+            batch=batch,
+            impacted=impacted,
+            held=[],
+            limit=self.cfg.trade_universe_limit,
+        )
 
     def _backtest_symbol(
         self,

@@ -19,7 +19,7 @@ from us_stock_agents.settings import get_settings
 
 log = logging.getLogger(__name__)
 _cycle_lock = threading.Lock()
-_CYCLE_WALL_TIMEOUT_SEC = 120
+_CYCLE_WALL_TIMEOUT_SEC = 150
 
 
 def run_cycle(force: bool = False) -> dict[str, Any]:
