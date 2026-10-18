@@ -1,83 +1,75 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
-from datetime import datetime, timedelta, timezone
+import json
 import logging
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 
 import pandas as pd
-import yfinance as yf
 
 log = logging.getLogger(__name__)
 
-_DOWNLOAD_TIMEOUT_SEC = 25
+_PER_SYMBOL_TIMEOUT_SEC = 8
+_BATCH_TIMEOUT_SEC = 30
+_MAX_WORKERS = 6
+_UA = "Mozilla/5.0 (compatible; us-stock-agents/1.0)"
 
 
-def _download_batch(symbols: list[str], start, end) -> dict[str, pd.DataFrame]:
-    out: dict[str, pd.DataFrame] = {}
-    if not symbols:
-        return out
-    # Chunk to keep each yfinance call small/fast on Railway.
-    chunk_size = 8
-    for i in range(0, len(symbols), chunk_size):
-        chunk = symbols[i : i + chunk_size]
-        try:
-            data = yf.download(
-                tickers=" ".join(chunk),
-                start=start,
-                end=end,
-                auto_adjust=True,
-                progress=False,
-                threads=True,
-                group_by="ticker",
-            )
-        except Exception as exc:  # noqa: BLE001
-            log.warning("yfinance chunk failed %s: %s", chunk, exc)
-            continue
-        if data is None or getattr(data, "empty", True):
-            continue
-        if len(chunk) == 1:
-            sym = chunk[0]
-            df = data.copy()
-            df.columns = [str(c).lower() for c in df.columns]
-            if "close" in df.columns:
-                out[sym] = df
-            continue
-        for sym in chunk:
-            try:
-                levels = data.columns.get_level_values(0)
-                if sym not in levels:
-                    continue
-                df = data[sym].copy()
-                df.columns = [str(c).lower() for c in df.columns]
-                if "close" in df.columns and not df["close"].dropna().empty:
-                    out[sym] = df.dropna(how="all")
-            except Exception as exc:  # noqa: BLE001
-                log.warning("parse failed for %s: %s", sym, exc)
-    return out
+def _fetch_yahoo_chart(symbol: str, days: int) -> tuple[str, pd.DataFrame | None]:
+    """Direct Yahoo chart JSON — avoids hung yfinance sessions on Railway."""
+    range_map = [(30, "1mo"), (90, "3mo"), (180, "6mo"), (365, "1y")]
+    range_str = "3mo"
+    for limit, label in range_map:
+        if days <= limit:
+            range_str = label
+            break
+    url = (
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+        f"?range={range_str}&interval=1d&includePrePost=false"
+    )
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": _UA})
+        with urllib.request.urlopen(req, timeout=_PER_SYMBOL_TIMEOUT_SEC) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        result = payload["chart"]["result"][0]
+        ts = result.get("timestamp") or []
+        quote = (result.get("indicators") or {}).get("quote") or [{}]
+        closes = quote[0].get("close") or []
+        if not ts or not closes:
+            return symbol, None
+        idx = pd.to_datetime(ts, unit="s", utc=True)
+        df = pd.DataFrame({"close": closes}, index=idx).dropna()
+        if df.empty:
+            return symbol, None
+        return symbol, df
+    except Exception as exc:  # noqa: BLE001
+        log.warning("price fetch failed for %s: %s", symbol, exc)
+        return symbol, None
 
 
 def fetch_history(symbols: list[str], days: int) -> dict[str, pd.DataFrame]:
-    end = datetime.now(timezone.utc)
-    days = min(int(days), 90)
-    start = (end - timedelta(days=days + 10)).date()
-    end_d = end.date()
     uniq = list(dict.fromkeys(symbols))[:12]
     if not uniq:
         return {}
-
-    pool = ThreadPoolExecutor(max_workers=1)
+    days = min(int(days), 120)
+    out: dict[str, pd.DataFrame] = {}
+    pool = ThreadPoolExecutor(max_workers=_MAX_WORKERS)
     try:
-        fut = pool.submit(_download_batch, uniq, start, end_d)
+        futs = {pool.submit(_fetch_yahoo_chart, sym, days): sym for sym in uniq}
         try:
-            return fut.result(timeout=_DOWNLOAD_TIMEOUT_SEC)
-        except FuturesTimeout:
-            log.warning("yfinance download timed out after %ss", _DOWNLOAD_TIMEOUT_SEC)
-            return {}
-        except Exception as exc:  # noqa: BLE001
-            log.warning("yfinance download failed: %s", exc)
-            return {}
+            for fut in as_completed(futs, timeout=_BATCH_TIMEOUT_SEC):
+                try:
+                    sym, df = fut.result()
+                    if df is not None:
+                        out[sym] = df
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("future failed: %s", exc)
+        except TimeoutError:
+            log.warning("price batch timed out with %s/%s symbols", len(out), len(uniq))
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
+    return out
 
 
 def last_close(prices: dict[str, pd.DataFrame], symbol: str) -> float | None:
