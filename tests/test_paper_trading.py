@@ -67,8 +67,14 @@ class PaperTradingAgentTests(unittest.TestCase):
             StrategyState(version=9, fast_ma=2, slow_ma=4, strategy_id=9)
         )
         self.agent = PaperTradingAgent(self.cfg, self.memory)
+        self._hydrate_patch = patch(
+            "us_stock_agents.agents.paper_trading.reconstruct_positions_from_trades",
+            return_value=None,
+        )
+        self._hydrate_patch.start()
 
     def tearDown(self) -> None:
+        self._hydrate_patch.stop()
         self._tmpdir.cleanup()
 
     def _run_with_prices(
@@ -280,6 +286,26 @@ class PaperTradingAgentTests(unittest.TestCase):
         self.assertEqual(loaded["strategy_version"], 99)
         self.assertEqual(loaded["strategy_id"], 99)
         self.assertEqual(self.agent._position_qty(loaded["positions"]["AAPL"]), 7)
+
+    def test_16_rsi_overbought_exit(self) -> None:
+        # Long rising series → RSI overbought; keep PnL inside stop/target band.
+        closes = [100 + i * 0.5 for i in range(40)]
+        df = pd.DataFrame({"close": closes})
+        entry = float(closes[-1]) / 1.02  # about +2%
+        self._seed_position("AAPL", qty=10, entry=entry)
+        report = self._run_with_prices({"AAPL": df}, {"AAPL": float(closes[-1])})
+        sells = [t for t in report.trades_today if t.side == "sell"]
+        self.assertEqual(len(sells), 1)
+        self.assertIn("RSI mean-reversion", sells[0].reason)
+
+    def test_17_rsi_oversold_can_buy(self) -> None:
+        # Sharp decline → RSI oversold
+        closes = [100 - i for i in range(30)]
+        df = pd.DataFrame({"close": closes})
+        report = self._run_with_prices({"AAPL": df}, {"AAPL": float(closes[-1])})
+        buys = [t for t in report.trades_today if t.side == "buy"]
+        self.assertTrue(buys)
+        self.assertIn("RSI oversold", buys[0].reason)
 
     def _seed_position(
         self,

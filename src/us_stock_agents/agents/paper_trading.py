@@ -15,14 +15,38 @@ from us_stock_agents.models import (
     PaperTrade,
     PaperTradingReport,
 )
+from us_stock_agents.portfolio_sync import reconstruct_positions_from_trades
+from us_stock_agents.strategies.signals import (
+    breakout_high,
+    compute_rsi,
+    is_ma_bearish,
+    is_ma_bullish,
+    is_rsi_overbought,
+    is_rsi_oversold,
+    momentum_positive,
+)
 
 
 class PaperTradingAgent:
-    """Simulates paper trades with stop-loss, take-profit, and MA exits."""
+    """Paper trades with multi-strategy exits (SMC-style playbook).
 
-    # Percent points: compare against pnl_pct = ((px - entry) / entry) * 100
+    Exit priority:
+      1) stop-loss (-5%)
+      2) take-profit (+10%)
+      3) RSI overbought mean-reversion exit
+      4) MA bearish trend exit
+      5) momentum failure (optional soft exit when below entry and momentum faded)
+
+    Entry (candidates only): MA bullish OR RSI oversold OR breakout high.
+    """
+
     STOP_LOSS_PCT = 5.0
     TAKE_PROFIT_PCT = 10.0
+    RSI_PERIOD = 14
+    RSI_OVERSOLD = 30.0
+    RSI_OVERBOUGHT = 70.0
+    BREAKOUT_LOOKBACK = 20
+    MOMENTUM_LOOKBACK = 20
 
     def __init__(self, cfg: AppConfig, memory: SharedMemory) -> None:
         self.cfg = cfg
@@ -45,7 +69,6 @@ class PaperTradingAgent:
             for sym, data in portfolio.get("positions", {}).items()
             if self._position_qty(data) > 0
         ]
-        # Evaluate held names every cycle; only candidates may open new BUYs.
         universe = list(dict.fromkeys(candidates + held_symbols))
 
         prices = fetch_history(universe, 120)
@@ -62,7 +85,6 @@ class PaperTradingAgent:
             qty = self._position_qty(position_data)
             entry_price = self._position_entry(position_data)
 
-            # --- exits first (every open position, even non-candidates) ---
             if qty > 0:
                 exit_decision = self._decide_exit(
                     entry_price=entry_price,
@@ -85,19 +107,19 @@ class PaperTradingAgent:
                     )
                 continue
 
-            # --- entries only for current candidates with no open position ---
             if symbol not in candidate_set:
                 continue
 
-            signal = self._entry_signal(
+            buy_reason = self._entry_reason(
                 prices.get(symbol), strategy.fast_ma, strategy.slow_ma
             )
-            if signal == "buy":
+            if buy_reason:
                 self._execute_buy(
                     portfolio=portfolio,
                     strategy=strategy,
                     symbol=symbol,
                     price=price,
+                    reason=buy_reason,
                     trades=trades,
                 )
 
@@ -127,8 +149,8 @@ class PaperTradingAgent:
             strategy_version=strategy.version,
             strategy_params={"fast_ma": strategy.fast_ma, "slow_ma": strategy.slow_ma},
             notes=(
-                "Paper trading only — no real orders. "
-                "Review state/portfolio.json and trade_journal.jsonl."
+                "Paper trading only. Strategies: MA trend, RSI mean-reversion, "
+                "breakout entry, stop/target risk exits."
             ),
         )
 
@@ -158,10 +180,6 @@ class PaperTradingAgent:
         fast: int,
         slow: int,
     ) -> tuple[str, float | None] | None:
-        """Return (reason, pnl_pct) when an exit triggers; else None.
-
-        Priority: stop-loss → take-profit → MA bearish.
-        """
         pnl_pct: float | None = None
         if entry_price is not None and entry_price > 0:
             pnl_pct = ((current_price - entry_price) / entry_price) * 100.0
@@ -177,37 +195,42 @@ class PaperTradingAgent:
                     round(pnl_pct, 2),
                 )
 
-        if self._is_ma_bearish(df, fast, slow):
+        rsi = compute_rsi(df["close"], self.RSI_PERIOD) if df is not None and "close" in df else None
+        if is_rsi_overbought(df, self.RSI_PERIOD, self.RSI_OVERBOUGHT):
+            return (
+                f"RSI mean-reversion exit (RSI={rsi:.1f} >= {self.RSI_OVERBOUGHT})",
+                round(pnl_pct, 2) if pnl_pct is not None else None,
+            )
+
+        if is_ma_bearish(df, fast, slow):
             return (
                 f"MA bearish exit (fast={fast}, slow={slow})",
                 round(pnl_pct, 2) if pnl_pct is not None else None,
             )
+
+        # Soft momentum exit: underwater and momentum no longer positive
+        if (
+            pnl_pct is not None
+            and pnl_pct < 0
+            and df is not None
+            and not momentum_positive(df, self.MOMENTUM_LOOKBACK)
+        ):
+            return (
+                f"Momentum fade exit at {pnl_pct:.2f}%",
+                round(pnl_pct, 2),
+            )
+
         return None
 
-    @staticmethod
-    def _is_ma_bearish(df: pd.DataFrame | None, fast: int, slow: int) -> bool:
-        if df is None or len(df) < slow + 1:
-            return False
-        close = df["close"].astype(float)
-        fast_ma = float(close.rolling(fast).mean().iloc[-1])
-        slow_ma = float(close.rolling(slow).mean().iloc[-1])
-        if pd.isna(fast_ma) or pd.isna(slow_ma):
-            return False
-        return fast_ma < slow_ma
-
-    @staticmethod
-    def _entry_signal(df: pd.DataFrame | None, fast: int, slow: int) -> str:
-        """BUY only on bullish MA state (fast > slow); otherwise hold."""
-        if df is None or len(df) < slow + 1:
-            return "hold"
-        close = df["close"].astype(float)
-        fast_ma = float(close.rolling(fast).mean().iloc[-1])
-        slow_ma = float(close.rolling(slow).mean().iloc[-1])
-        if pd.isna(fast_ma) or pd.isna(slow_ma):
-            return "hold"
-        if fast_ma > slow_ma:
-            return "buy"
-        return "hold"
+    def _entry_reason(self, df: pd.DataFrame | None, fast: int, slow: int) -> str | None:
+        if is_rsi_oversold(df, self.RSI_PERIOD, self.RSI_OVERSOLD):
+            rsi = compute_rsi(df["close"], self.RSI_PERIOD) if df is not None else None
+            return f"RSI oversold buy (RSI={rsi:.1f})" if rsi is not None else "RSI oversold buy"
+        if is_ma_bullish(df, fast, slow):
+            return f"MA bullish buy (fast={fast}, slow={slow})"
+        if breakout_high(df, self.BREAKOUT_LOOKBACK):
+            return f"Breakout buy (new {self.BREAKOUT_LOOKBACK}-day high)"
+        return None
 
     def _execute_buy(
         self,
@@ -216,6 +239,7 @@ class PaperTradingAgent:
         strategy: StrategyState,
         symbol: str,
         price: float,
+        reason: str,
         trades: list[PaperTrade],
     ) -> None:
         if self._position_qty(portfolio["positions"].get(symbol)) > 0:
@@ -244,7 +268,7 @@ class PaperTradingAgent:
             side="buy",
             qty=round(qty, 4),
             price=round(price, 2),
-            reason=f"MA bullish buy (fast={strategy.fast_ma}, slow={strategy.slow_ma})",
+            reason=reason,
             pnl_pct=None,
         )
         trades.append(trade)
@@ -264,7 +288,6 @@ class PaperTradingAgent:
     ) -> None:
         if qty <= 0:
             return
-        # Guard against duplicate sells in the same cycle.
         if self._position_qty(portfolio["positions"].get(symbol)) <= 0:
             return
 
@@ -308,7 +331,7 @@ class PaperTradingAgent:
         mistakes = self.memory.recent_mistakes()
         lesson = (
             f"Loss on {trade.symbol} ({trade.pnl_pct:.2f}%): {trade.reason}. "
-            "Review stop/target sizing and MA window."
+            "Review stop/target sizing and strategy filters."
         )
         lessons.append(lesson)
         self.memory.append_mistake(
@@ -349,15 +372,36 @@ class PaperTradingAgent:
             "strategy_id": strategy_id,
         }
 
-        if not self.portfolio_path.exists():
+        data: dict[str, Any] | None = None
+        if self.portfolio_path.exists():
+            try:
+                data = json.loads(self.portfolio_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError, TypeError):
+                data = None
+
+        has_open = bool(
+            data
+            and any(self._position_qty(v) > 0 for v in (data.get("positions") or {}).values())
+        )
+
+        # Railway: restore open lots from durable Postgres trades when local file empty.
+        if not has_open:
+            hydrated = reconstruct_positions_from_trades()
+            if hydrated and hydrated.get("positions"):
+                open_cost = sum(
+                    self._position_qty(pos) * float(pos.get("entry_price") or 0)
+                    for pos in hydrated["positions"].values()
+                    if isinstance(pos, dict)
+                )
+                data = {
+                    "cash": round(max(self.cfg.initial_cash - open_cost, 0.0), 2),
+                    "positions": hydrated["positions"],
+                    "hydrated_from": "postgres_trades",
+                }
+
+        if not data:
             return fresh
 
-        try:
-            data = json.loads(self.portfolio_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError, TypeError):
-            return fresh
-
-        # Preserve cash and open positions across strategy mutations.
         data.setdefault("cash", self.cfg.initial_cash)
         data.setdefault("positions", {})
         data["strategy_version"] = strategy_version
