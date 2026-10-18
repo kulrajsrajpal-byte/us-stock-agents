@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 from us_stock_agents.config import load_config
@@ -16,6 +17,7 @@ from us_stock_agents.persist import sync_strategy_from_pipeline
 from us_stock_agents.settings import get_settings
 
 log = logging.getLogger(__name__)
+_cycle_lock = threading.Lock()
 
 
 def run_cycle(force: bool = False) -> dict[str, Any]:
@@ -29,6 +31,21 @@ def run_cycle(force: bool = False) -> dict[str, Any]:
             "hermes": hermes_status(),
         }
 
+    if not _cycle_lock.acquire(blocking=False):
+        return {
+            "skipped": True,
+            "reason": "cycle_already_running",
+            "coach": coach_status(),
+            "hermes": hermes_status(),
+        }
+
+    try:
+        return _run_cycle_locked(force=force, settings=settings)
+    finally:
+        _cycle_lock.release()
+
+
+def _run_cycle_locked(force: bool, settings: Any) -> dict[str, Any]:
     init_db()
     cfg = load_config()
     orch = Orchestrator(cfg)
@@ -72,7 +89,6 @@ def run_cycle(force: bool = False) -> dict[str, Any]:
             payload,
             strategy_id=decision.strategy.id,
         )
-        # Optional external Hermes — ignored when disabled / unusable login
         payload["hermes_taught"] = False
         if hermes_enabled():
             payload["hermes_taught"] = teach_hermes_cycle(
