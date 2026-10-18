@@ -23,10 +23,14 @@ class BacktestAgent:
         self,
         sentiment: SentimentReport | None = None,
         activity: ActivityReport | None = None,
+        prices: dict[str, pd.DataFrame] | None = None,
     ) -> BacktestReport:
         strategy = self.memory.load_strategy(self.cfg.fast_ma, self.cfg.slow_ma)
         symbols = self._priority_symbols(activity)
-        prices = fetch_history(symbols, self.cfg.history_days)
+        if prices is None:
+            prices = fetch_history(symbols, self.cfg.history_days)
+        self._last_prices = prices
+        self._last_symbols = symbols
 
         per_symbol: list[BacktestMetrics] = []
         for symbol in symbols:

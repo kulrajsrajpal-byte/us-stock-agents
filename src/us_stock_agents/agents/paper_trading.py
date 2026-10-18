@@ -57,6 +57,7 @@ class PaperTradingAgent:
         self,
         backtest: BacktestReport,
         activity: ActivityReport | None = None,
+        prices: dict[str, pd.DataFrame] | None = None,
     ) -> PaperTradingReport:
         strategy = self.memory.load_strategy(self.cfg.fast_ma, self.cfg.slow_ma)
         self._active_stop = (
@@ -81,7 +82,13 @@ class PaperTradingAgent:
         ]
         universe = list(dict.fromkeys(candidates + held_symbols))
 
-        prices = fetch_history(universe, 120)
+        if prices is None:
+            prices = fetch_history(universe, min(120, self.cfg.history_days))
+        else:
+            # Ensure held/candidate symbols not in shared batch still get prices.
+            missing = [s for s in universe if s not in prices]
+            if missing:
+                prices = {**prices, **fetch_history(missing, min(120, self.cfg.history_days))}
         trades: list[PaperTrade] = []
         lessons: list[str] = []
         candidate_set = set(candidates)
