@@ -6,8 +6,9 @@ from typing import Any
 from us_stock_agents.config import load_config
 from us_stock_agents.db import init_db, session_scope
 from us_stock_agents.evolution import StrategyEvolver
-from us_stock_agents.hermes import teach_hermes_cycle
+from us_stock_agents.hermes import hermes_enabled, hermes_status, teach_hermes_cycle
 from us_stock_agents.market_hours import is_us_regular_session
+from us_stock_agents.memory import SharedMemory
 from us_stock_agents.notify import send_telegram
 from us_stock_agents.orchestrator import Orchestrator
 from us_stock_agents.persist import sync_strategy_from_pipeline
@@ -23,6 +24,7 @@ def run_cycle(force: bool = False) -> dict[str, Any]:
         return {
             "skipped": True,
             "reason": "outside_us_market_hours",
+            "hermes": hermes_status(),
         }
 
     init_db()
@@ -32,9 +34,11 @@ def run_cycle(force: bool = False) -> dict[str, Any]:
 
     with session_scope() as session:
         strategy = sync_strategy_from_pipeline(session, result, result.paper.lessons)
-        decision = StrategyEvolver().evaluate(session, strategy)
+        decision = StrategyEvolver(memory=SharedMemory(cfg.state_dir)).evaluate(
+            session, strategy
+        )
 
-        payload = {
+        payload: dict[str, Any] = {
             "skipped": False,
             "sentiment": result.sentiment.overall_label,
             "sentiment_score": result.sentiment.overall_score,
@@ -46,16 +50,25 @@ def run_cycle(force: bool = False) -> dict[str, Any]:
             "strategy_params": {
                 "fast_ma": decision.strategy.fast_ma,
                 "slow_ma": decision.strategy.slow_ma,
+                "source": (decision.strategy.params or {}).get("source"),
+                "stop_loss_pct": (decision.strategy.params or {}).get("stop_loss_pct"),
+                "take_profit_pct": (decision.strategy.params or {}).get("take_profit_pct"),
             },
             "evolution": decision.action,
             "evolution_message": decision.message,
-            "champion": decision.strategy.is_champion,
+            "champion": bool(decision.strategy.is_champion),
             "trades": len(result.paper.trades_today),
             "lessons": result.paper.lessons,
+            "hermes": hermes_status(),
+            "continue_until_profit": settings.continue_until_profit,
+            "profit_target_pct": settings.profit_target_pct,
         }
 
-    # Feed Hermes long-term memory (Railway) so future mutations learn from outcomes
-    payload["hermes_taught"] = teach_hermes_cycle(payload)
+        payload["hermes_taught"] = teach_hermes_cycle(
+            payload,
+            session=session,
+            strategy_id=decision.strategy.id,
+        )
 
     text = (
         "US Stock Agents cycle\n"
@@ -64,6 +77,7 @@ def run_cycle(force: bool = False) -> dict[str, Any]:
         f"Strategy: v{payload['strategy_version']} "
         f"MA {payload['strategy_params']['fast_ma']}/{payload['strategy_params']['slow_ma']}\n"
         f"Evolution: {payload['evolution']}\n"
+        f"Hermes enabled: {hermes_enabled()}\n"
         f"{payload['evolution_message']}"
     )
     send_telegram(text)

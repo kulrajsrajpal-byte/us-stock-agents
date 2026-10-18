@@ -18,6 +18,9 @@ class StrategyState:
     last_paper_equity: float | None = None
     updated_at: str | None = None
     strategy_id: int | None = None
+    stop_loss_pct: float | None = None
+    take_profit_pct: float | None = None
+    source: str | None = None
 
 
 class SharedMemory:

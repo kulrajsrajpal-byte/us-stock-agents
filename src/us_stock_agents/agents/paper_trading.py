@@ -59,6 +59,16 @@ class PaperTradingAgent:
         activity: ActivityReport | None = None,
     ) -> PaperTradingReport:
         strategy = self.memory.load_strategy(self.cfg.fast_ma, self.cfg.slow_ma)
+        self._active_stop = (
+            float(strategy.stop_loss_pct)
+            if strategy.stop_loss_pct is not None
+            else self.STOP_LOSS_PCT
+        )
+        self._active_take = (
+            float(strategy.take_profit_pct)
+            if strategy.take_profit_pct is not None
+            else self.TAKE_PROFIT_PCT
+        )
         portfolio = self._load_portfolio(strategy.version, strategy.strategy_id)
 
         candidates = list(
@@ -184,12 +194,14 @@ class PaperTradingAgent:
         if entry_price is not None and entry_price > 0:
             pnl_pct = ((current_price - entry_price) / entry_price) * 100.0
 
-            if pnl_pct <= -self.STOP_LOSS_PCT:
+            stop = getattr(self, "_active_stop", self.STOP_LOSS_PCT)
+            take = getattr(self, "_active_take", self.TAKE_PROFIT_PCT)
+            if pnl_pct <= -stop:
                 return (
                     f"Stop-loss triggered at {pnl_pct:.2f}%",
                     round(pnl_pct, 2),
                 )
-            if pnl_pct >= self.TAKE_PROFIT_PCT:
+            if pnl_pct >= take:
                 return (
                     f"Take-profit triggered at {pnl_pct:.2f}%",
                     round(pnl_pct, 2),

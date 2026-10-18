@@ -1,49 +1,66 @@
-# Hermes Self-Improving Agent on Railway
+# Hermes 24×7 learning loop (Railway + Postgres)
 
-Hermes (Nous Research) remembers past sessions, improves skills, and coaches our paper-trading mutations. Deploy it **only on Railway** (not the laptop).
+Hermes coaches strategy mutations. **FastAPI** still runs paper trades and writes everything to **PostgreSQL**. Both must run on Railway (not the laptop).
 
-## Role in this system
-
-| Without Hermes | With Hermes |
-|----------------|-------------|
-| Random MA parameter mutations on losses | Hermes proposes next `fast_ma` / `slow_ma` from lessons |
-| No long-term narrative memory | Each cycle is taught back to Hermes for later coaching |
-
-Our FastAPI app still owns execution (backtest + paper trades + Postgres). Hermes is the **learning coach**.
+## Architecture
 
 ```mermaid
-flowchart LR
-  api[FastAPI trading brain] -->|cycle summary| hermes[Hermes on Railway]
-  hermes -->|suggested MA params| api
-  api --> pg[(PostgreSQL)]
+flowchart TB
+  sched[FastAPI scheduler 24x7] --> cycle[run cycle]
+  cycle --> paper[Paper trade + risk exits]
+  paper --> pg[(PostgreSQL)]
+  cycle --> evolver[Strategy evolver]
+  evolver -->|ask patch| hermes[Hermes on Railway]
+  hermes -->|advice JSON| evolver
+  evolver --> pg
+  cycle -->|teach memory| hermes
+  hermes --> pg
 ```
 
-## Deploy Hermes (same Railway project)
+Loop rule: **keep mutating until a champion hits `PROFIT_TARGET_PCT`** (default +5%) with enough trades. Hermes suggestions are stored in table `hermes_advice`.
 
-1. Railway project → **+ New** → **Template** → **Hermes** / **Hermes Self Improving agent**
-2. Prefer a template with a **persistent volume** (`/opt/data` or `/data`) so memory survives redeploys
-3. Open Hermes dashboard / `/setup` on its public domain
-4. Configure an LLM provider key (OpenRouter / Anthropic / OpenAI — whatever the template asks)
-5. Enable HTTP API if the template supports it (`API_SERVER_KEY` or similar)
-6. Optional: connect Telegram on Hermes for chat coaching
+## 1. Deploy Hermes (same Railway project)
 
-## Wire into our FastAPI service
+1. **+ New → Template → Hermes / Hermes Self Improving agent**
+2. Attach a **volume** (`/opt/data` or `/data`)
+3. Open Hermes domain → `/setup`
+4. Add LLM API key (OpenRouter / OpenAI / Anthropic)
+5. Enable HTTP API → copy **`API_SERVER_KEY`**
+6. Note public URL: `https://….up.railway.app`
 
-On the **us-stock-agents** service Variables:
+## 2. Wire FastAPI (`us-stock-agents` Variables)
 
 | Variable | Value |
 |----------|--------|
 | `HERMES_ENABLED` | `true` |
-| `HERMES_API_URL` | `https://YOUR-HERMES.up.railway.app` (no trailing slash issues OK) |
-| `HERMES_API_KEY` | Hermes `API_SERVER_KEY` / bearer from `/setup` |
-| `HERMES_MODEL` | `default` or the model id Hermes exposes |
+| `HERMES_API_URL` | `https://YOUR-HERMES.up.railway.app` |
+| `HERMES_API_KEY` | Hermes API key |
+| `HERMES_MODEL` | `default` (or model id) |
+| `CONTINUE_UNTIL_PROFIT` | `true` |
+| `PROFIT_TARGET_PCT` | `5.0` |
+| `MAX_DRAWDOWN_PCT` | `10.0` |
+| `CHAMPION_MIN_TRADES` | `5` |
+| `RUN_INTERVAL_MINUTES` | `30` |
+| `MARKET_HOURS_ONLY` | `true` (paper cycles in US session; scheduler stays up 24×7) |
 
-Redeploy the FastAPI service after saving.
+Do **not** change `DATABASE_URL` / Postgres credentials.
 
-## Verify
+## 3. Merge code to `main` so Railway redeploys
 
-1. Force a cycle: `POST /run?force=true`
-2. On a losing / drawdown strategy, check `strategies.notes` — should mention `Hermes-mutated...`
-3. Response JSON includes `"hermes_taught": true` when memory write succeeds
+```bash
+git checkout main
+git pull origin main
+git merge feature/stop-loss-take-profit
+git push origin main
+```
 
-If Hermes is down, the app **falls back** to random mutation so paper trading never stops.
+## 4. Verify
+
+- `GET /hermes` → `"enabled": true` and advice list  
+- `GET /status` → includes `hermes` + `continue_until_profit`  
+- `GET /run?force=true` → may show `evolution: mutate|consult` with `source: hermes`  
+- Postgres tables: `strategies`, `trades`, `pipeline_runs`, `mistakes`, **`hermes_advice`**
+
+## Honest note
+
+Hermes + paper trading can **search** for parameters that look profitable in simulation. That does **not** guarantee live profit. Stop when you have a champion you trust, then review manually before any real capital.

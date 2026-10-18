@@ -101,6 +101,21 @@ class RunRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class HermesAdviceRow(Base):
+    """Durable Hermes coach suggestions stored in Postgres."""
+
+    __tablename__ = "hermes_advice"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    strategy_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(32), default="patch")  # teach|patch|consult
+    request_summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    advice: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    applied: Mapped[bool] = mapped_column(Boolean, default=False)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 _engine = None
 _SessionLocal = None
 

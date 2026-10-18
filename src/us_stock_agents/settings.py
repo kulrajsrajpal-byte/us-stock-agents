@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     hermes_api_url: str = ""
     hermes_api_key: str = ""
     hermes_model: str = "default"
+    # Keep mutating/consulting until a champion hits PROFIT_TARGET_PCT
+    continue_until_profit: bool = True
+    # Also ask Hermes when return is near-flat after enough trades
+    hermes_flat_band_pct: float = 1.0
 
 
 @lru_cache
