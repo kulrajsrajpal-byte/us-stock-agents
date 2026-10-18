@@ -1,30 +1,36 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 
 from us_stock_agents.settings import get_settings
 
 log = logging.getLogger(__name__)
+_pool = ThreadPoolExecutor(max_workers=1)
 
 
 def send_telegram(text: str) -> bool:
+    """Fire-and-forget so Telegram never blocks the trading cycle."""
     settings = get_settings()
     token = settings.telegram_bot_token
     chat_id = settings.telegram_chat_id
     if not token or not chat_id:
         log.info("Telegram not configured; skipping notify.")
         return False
+    _pool.submit(_send, token, chat_id, text)
+    return True
+
+
+def _send(token: str, chat_id: str, text: str) -> None:
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
         resp = httpx.post(
             url,
             json={"chat_id": chat_id, "text": text[:4000], "disable_web_page_preview": True},
-            timeout=8,
+            timeout=5,
         )
         resp.raise_for_status()
-        return True
     except Exception as exc:  # noqa: BLE001
         log.warning("Telegram notify failed: %s", exc)
-        return False
