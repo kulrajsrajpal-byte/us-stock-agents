@@ -153,8 +153,19 @@ def get_engine():
                 url,
             )
             _ensure_sqlite_parent(url)
-        connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-        _engine = create_engine(url, pool_pre_ping=True, connect_args=connect_args)
+        if url.startswith("sqlite"):
+            connect_args: dict = {"check_same_thread": False}
+        else:
+            # Fail fast if Railway Postgres is slow instead of hanging the cycle.
+            connect_args = {"connect_timeout": 10}
+        _engine = create_engine(
+            url,
+            pool_pre_ping=True,
+            pool_size=2,
+            max_overflow=2,
+            pool_timeout=15,
+            connect_args=connect_args,
+        )
         _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False)
         log.info("Database engine ready: %s", urlparse(url).scheme)
     return _engine

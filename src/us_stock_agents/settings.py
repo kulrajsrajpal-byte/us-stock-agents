@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     run_interval_minutes: int = 15
     # False = keep scanning/evolving overnight (paper only).
     market_hours_only: bool = False
+    # Skip RSS sentiment (use neutral) so cycles finish under wall timeout.
+    skip_sentiment: bool = True
     timezone: str = "America/New_York"
     profit_target_pct: float = 5.0
     max_drawdown_pct: float = 10.0

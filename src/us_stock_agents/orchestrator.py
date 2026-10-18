@@ -15,10 +15,11 @@ from us_stock_agents.market_data import fetch_history
 from us_stock_agents.memory import SharedMemory
 from us_stock_agents.models import ActivityReport, PipelineResult, SentimentReport
 from us_stock_agents.reporting import write_report
+from us_stock_agents.settings import get_settings
 from us_stock_agents.universe import merge_priority, rotate_batch
 
 log = logging.getLogger(__name__)
-_SENTIMENT_TIMEOUT_SEC = 20
+_SENTIMENT_TIMEOUT_SEC = 12
 
 
 class Orchestrator:
