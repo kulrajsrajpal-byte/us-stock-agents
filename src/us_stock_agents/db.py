@@ -186,7 +186,9 @@ def utcnow() -> datetime:
 
 def get_or_create_active_strategy(session: Session, fast: int, slow: int) -> StrategyRow:
     row = session.scalar(
-        select(StrategyRow).where(StrategyRow.status == "active").order_by(StrategyRow.id.desc())
+        select(StrategyRow)
+        .where(StrategyRow.status.in_(["active", "champion"]))
+        .order_by(StrategyRow.id.desc())
     )
     if row:
         return row

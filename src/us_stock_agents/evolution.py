@@ -35,6 +35,16 @@ class StrategyEvolver:
         strategy.paper_return_pct = round(ret, 2)
         strategy.updated_at = utcnow()
 
+        sells = self._recent_sells(session, strategy.id)
+        sell_pnls = [
+            float(s["pnl_pct"])
+            for s in sells
+            if s.get("pnl_pct") is not None
+        ]
+        avg_sell = sum(sell_pnls) / len(sell_pnls) if sell_pnls else 0.0
+        # Inflated equity with only losing/no sells is accounting noise — keep searching.
+        bogus_equity = ret >= 25.0 and (not sell_pnls or avg_sell < 0)
+
         if ret <= -self.settings.max_drawdown_pct:
             strategy.status = "retired"
             session.flush()
@@ -50,9 +60,37 @@ class StrategyEvolver:
                 ),
             )
 
+        if strategy.is_champion or strategy.status == "champion":
+            if bogus_equity or (
+                len(sell_pnls) >= 2 and avg_sell < 0 and ret < self.settings.profit_target_pct
+            ):
+                strategy.is_champion = False
+                strategy.status = "retired"
+                session.flush()
+                child = self._spawn_mutant(session, strategy, reason="false_champion_unprofitable_sells")
+                return EvolutionDecision(
+                    action="mutate",
+                    strategy=child,
+                    message=(
+                        f"Demoted fake champion v{strategy.version} "
+                        f"(equity ret {ret:.2f}%, avg sell {avg_sell:.2f}%). "
+                        f"Spawned v{child.version} MA {child.fast_ma}/{child.slow_ma}."
+                    ),
+                )
+            return EvolutionDecision(
+                action="keep",
+                strategy=strategy,
+                message=(
+                    f"Champion v{strategy.version} still active: "
+                    f"paper return {ret:.2f}%, avg sell {avg_sell:.2f}%."
+                ),
+            )
+
         if (
             ret >= self.settings.profit_target_pct
-            and (strategy.trade_count or 0) >= self.settings.champion_min_trades
+            and not bogus_equity
+            and len(sell_pnls) >= self.settings.champion_min_trades
+            and avg_sell > 0
             and not strategy.is_champion
         ):
             for old in session.scalars(select(StrategyRow).where(StrategyRow.is_champion.is_(True))):
@@ -67,19 +105,9 @@ class StrategyEvolver:
                 strategy=strategy,
                 message=(
                     f"CHAMPION: v{strategy.version} paper return {ret:.2f}% "
-                    f"with {strategy.trade_count} trades "
-                    f"(target {self.settings.profit_target_pct}%). "
+                    f"(avg sell {avg_sell:.2f}% over {len(sell_pnls)} sells, "
+                    f"target {self.settings.profit_target_pct}%). "
                     "Self-improving loop pauses promotion search on this champion."
-                ),
-            )
-
-        if strategy.is_champion or strategy.status == "champion":
-            return EvolutionDecision(
-                action="keep",
-                strategy=strategy,
-                message=(
-                    f"Champion v{strategy.version} still active: "
-                    f"paper return {ret:.2f}%."
                 ),
             )
 
