@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
@@ -55,7 +56,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="US Stock Multi-Agent",
     description="24/7 paper trading + strategy evolution on Railway",
-    version="0.3.3",
+    version="0.3.4",
     lifespan=lifespan,
 )
 
@@ -71,7 +72,7 @@ def health() -> dict[str, Any]:
     settings = get_settings()
     return {
         "status": "ok",
-        "version": "0.3.3",
+        "version": "0.3.4",
         "market_data": "stooq_yahoo",
         "run_interval_minutes": settings.run_interval_minutes,
         "market_hours_only": settings.market_hours_only,
@@ -81,33 +82,46 @@ def health() -> dict[str, Any]:
     }
 
 
+async def _run_with_budget(force: bool) -> dict[str, Any]:
+    """Keep the event loop free so /health works while a cycle runs."""
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(run_cycle, force), timeout=40)
+    except TimeoutError:
+        return {
+            "skipped": True,
+            "reason": "cycle_timeout",
+            "coach": coach_status(),
+            "hermes": hermes_status(),
+        }
+
+
 @app.post("/run")
-def trigger_run(
+async def trigger_run(
     force: bool = True,
     x_api_key: str | None = Header(default=None),
 ) -> dict[str, Any]:
     _check_api_key(x_api_key)
-    return run_cycle(force=force)
+    return await _run_with_budget(force)
 
 
 @app.get("/run")
-def trigger_run_browser(
+async def trigger_run_browser(
     force: bool = True,
     api_key: str | None = None,
     x_api_key: str | None = Header(default=None),
 ) -> dict[str, Any]:
     """Same as POST /run — open this URL in a browser (no terminal needed)."""
     _check_api_key(x_api_key or api_key)
-    return run_cycle(force=force)
+    return await _run_with_budget(force)
 
 
 @app.get("/run/lite")
-def trigger_run_lite(
+async def trigger_run_lite(
     x_api_key: str | None = Header(default=None),
 ) -> dict[str, Any]:
     """Faster cycle: force=True, always skip market-hours gate."""
     _check_api_key(x_api_key)
-    return run_cycle(force=True)
+    return await _run_with_budget(True)
 
 
 @app.get("/status")

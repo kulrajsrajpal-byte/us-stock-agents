@@ -21,4 +21,4 @@ COPY src ./src
 EXPOSE 8000
 
 # Railway injects PORT; default 8000 for local Docker
-CMD ["sh", "-c", "uvicorn us_stock_agents.api:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "uvicorn us_stock_agents.api:app --host 0.0.0.0 --port ${PORT:-8000} --timeout-keep-alive 5 --limit-concurrency 20"]
