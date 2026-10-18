@@ -84,11 +84,7 @@ class PaperTradingAgent:
 
         if prices is None:
             prices = fetch_history(universe, min(120, self.cfg.history_days))
-        else:
-            # Ensure held/candidate symbols not in shared batch still get prices.
-            missing = [s for s in universe if s not in prices]
-            if missing:
-                prices = {**prices, **fetch_history(missing, min(120, self.cfg.history_days))}
+        # Do not re-fetch missing symbols — a second round doubled timeouts on Railway.
         trades: list[PaperTrade] = []
         lessons: list[str] = []
         candidate_set = set(candidates)

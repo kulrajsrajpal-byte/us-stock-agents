@@ -55,7 +55,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="US Stock Multi-Agent",
     description="24/7 paper trading + strategy evolution on Railway",
-    version="0.3.1",
+    version="0.3.3",
     lifespan=lifespan,
 )
 
@@ -71,8 +71,8 @@ def health() -> dict[str, Any]:
     settings = get_settings()
     return {
         "status": "ok",
-        "version": "0.3.2",
-        "market_data": "yahoo_http_sequential",
+        "version": "0.3.3",
+        "market_data": "stooq_yahoo",
         "run_interval_minutes": settings.run_interval_minutes,
         "market_hours_only": settings.market_hours_only,
         "continue_until_profit": settings.continue_until_profit,
