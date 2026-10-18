@@ -10,6 +10,7 @@ from sqlalchemy import desc, select
 
 from us_stock_agents.db import HermesAdviceRow, RunRow, StrategyRow, TradeRow, init_db, session_scope
 from us_stock_agents.hermes import hermes_status
+from us_stock_agents.local_coach import coach_status
 from us_stock_agents.service import run_cycle
 from us_stock_agents.settings import get_settings
 
@@ -137,6 +138,7 @@ def status() -> dict[str, Any]:
                 "sentiment_label": last.sentiment_label,
                 "themes": last.themes,
             },
+            "coach": coach_status(),
             "hermes": hermes_status(),
             "profit_target_pct": get_settings().profit_target_pct,
             "continue_until_profit": get_settings().continue_until_profit,
@@ -195,15 +197,17 @@ def list_trades(limit: int = 50) -> list[dict[str, Any]]:
 
 
 @app.get("/hermes")
-def hermes_info(limit: int = 20) -> dict[str, Any]:
-    """Hermes coach status + recent Postgres-stored advice."""
+@app.get("/coach")
+def coach_info(limit: int = 20) -> dict[str, Any]:
+    """Built-in local coach (+ optional Hermes) status and Postgres advice log."""
     init_db()
     with session_scope() as session:
         rows = session.scalars(
             select(HermesAdviceRow).order_by(desc(HermesAdviceRow.id)).limit(limit)
         ).all()
         return {
-            "status": hermes_status(),
+            "coach": coach_status(),
+            "hermes": hermes_status(),
             "recent_advice": [
                 {
                     "id": r.id,

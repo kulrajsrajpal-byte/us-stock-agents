@@ -46,6 +46,9 @@ class SharedMemory:
                     .order_by(StrategyRow.id.desc())
                 )
                 if row:
+                    params = row.params or {}
+                    stop = params.get("stop_loss_pct")
+                    take = params.get("take_profit_pct")
                     state = StrategyState(
                         version=row.version,
                         fast_ma=row.fast_ma,
@@ -53,6 +56,9 @@ class SharedMemory:
                         last_backtest_return_pct=row.backtest_return_pct,
                         last_paper_equity=row.paper_equity,
                         strategy_id=row.id,
+                        stop_loss_pct=float(stop) if stop is not None else None,
+                        take_profit_pct=float(take) if take is not None else None,
+                        source=params.get("source"),
                     )
                     self.save_strategy(state)  # mirror to disk for local tools
                     return state

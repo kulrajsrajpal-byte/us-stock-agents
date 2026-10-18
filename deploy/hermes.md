@@ -1,5 +1,9 @@
 # Hermes 24×7 learning loop (Railway + Postgres)
 
+> **Prefer the built-in coach.** Hermes login often fails. Use
+> [`LOCAL-COACH.md`](./LOCAL-COACH.md) instead (`LOCAL_COACH_ENABLED=true`, no
+> external API). Hermes below is optional only.
+
 Hermes coaches strategy mutations. **FastAPI** still runs paper trades and writes everything to **PostgreSQL**. Both must run on Railway (not the laptop).
 
 ## Architecture

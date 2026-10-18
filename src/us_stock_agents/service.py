@@ -7,6 +7,7 @@ from us_stock_agents.config import load_config
 from us_stock_agents.db import init_db, session_scope
 from us_stock_agents.evolution import StrategyEvolver
 from us_stock_agents.hermes import hermes_enabled, hermes_status, teach_hermes_cycle
+from us_stock_agents.local_coach import coach_status, teach_local_cycle
 from us_stock_agents.market_hours import is_us_regular_session
 from us_stock_agents.memory import SharedMemory
 from us_stock_agents.notify import send_telegram
@@ -24,6 +25,7 @@ def run_cycle(force: bool = False) -> dict[str, Any]:
         return {
             "skipped": True,
             "reason": "outside_us_market_hours",
+            "coach": coach_status(),
             "hermes": hermes_status(),
         }
 
@@ -59,16 +61,25 @@ def run_cycle(force: bool = False) -> dict[str, Any]:
             "champion": bool(decision.strategy.is_champion),
             "trades": len(result.paper.trades_today),
             "lessons": result.paper.lessons,
+            "coach": coach_status(),
             "hermes": hermes_status(),
             "continue_until_profit": settings.continue_until_profit,
             "profit_target_pct": settings.profit_target_pct,
         }
 
-        payload["hermes_taught"] = teach_hermes_cycle(
+        payload["coach_taught"] = teach_local_cycle(
+            session,
             payload,
-            session=session,
             strategy_id=decision.strategy.id,
         )
+        # Optional external Hermes — ignored when disabled / unusable login
+        payload["hermes_taught"] = False
+        if hermes_enabled():
+            payload["hermes_taught"] = teach_hermes_cycle(
+                payload,
+                session=session,
+                strategy_id=decision.strategy.id,
+            )
 
     text = (
         "US Stock Agents cycle\n"
@@ -76,8 +87,9 @@ def run_cycle(force: bool = False) -> dict[str, Any]:
         f"Paper equity: ${payload['paper_equity']:,.2f} ({payload['paper_return_pct']}%)\n"
         f"Strategy: v{payload['strategy_version']} "
         f"MA {payload['strategy_params']['fast_ma']}/{payload['strategy_params']['slow_ma']}\n"
-        f"Evolution: {payload['evolution']}\n"
-        f"Hermes enabled: {hermes_enabled()}\n"
+        f"Evolution: {payload['evolution']} "
+        f"(source={payload['strategy_params'].get('source')})\n"
+        f"Local coach: on | Hermes: {'on' if hermes_enabled() else 'off'}\n"
         f"{payload['evolution_message']}"
     )
     send_telegram(text)
