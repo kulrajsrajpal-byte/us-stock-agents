@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import re
+import urllib.request
 from datetime import datetime, timezone
 
 import feedparser
@@ -8,6 +10,9 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 from us_stock_agents.config import AppConfig
 from us_stock_agents.models import NewsItem, SentimentReport
+
+log = logging.getLogger(__name__)
+_FEED_TIMEOUT_SEC = 12
 
 
 class SentimentAgent:
@@ -61,7 +66,17 @@ class SentimentAgent:
     def _fetch_news(self) -> list[NewsItem]:
         out: list[NewsItem] = []
         for url in self.cfg.news_feeds:
-            parsed = feedparser.parse(url)
+            try:
+                req = urllib.request.Request(
+                    url,
+                    headers={"User-Agent": "us-stock-agents/1.0"},
+                )
+                with urllib.request.urlopen(req, timeout=_FEED_TIMEOUT_SEC) as resp:
+                    raw = resp.read()
+                parsed = feedparser.parse(raw)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("RSS fetch failed for %s: %s", url, exc)
+                continue
             for entry in parsed.entries[:40]:
                 title = getattr(entry, "title", "") or ""
                 summary = getattr(entry, "summary", "") or getattr(entry, "description", "") or ""
