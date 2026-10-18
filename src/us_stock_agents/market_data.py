@@ -1,37 +1,31 @@
 from __future__ import annotations
 
-import json
 import logging
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
+import httpx
 import pandas as pd
 
 log = logging.getLogger(__name__)
 
-_PER_SYMBOL_TIMEOUT_SEC = 8
-_BATCH_TIMEOUT_SEC = 30
-_MAX_WORKERS = 6
+_PER_SYMBOL_TIMEOUT_SEC = 6.0
+_BATCH_TIMEOUT_SEC = 25
+_MAX_WORKERS = 8
 _UA = "Mozilla/5.0 (compatible; us-stock-agents/1.0)"
 
 
 def _fetch_yahoo_chart(symbol: str, days: int) -> tuple[str, pd.DataFrame | None]:
-    """Direct Yahoo chart JSON — avoids hung yfinance sessions on Railway."""
-    range_map = [(30, "1mo"), (90, "3mo"), (180, "6mo"), (365, "1y")]
-    range_str = "3mo"
-    for limit, label in range_map:
-        if days <= limit:
-            range_str = label
-            break
+    range_str = "3mo" if days <= 100 else "6mo"
     url = (
         f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
         f"?range={range_str}&interval=1d&includePrePost=false"
     )
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": _UA})
-        with urllib.request.urlopen(req, timeout=_PER_SYMBOL_TIMEOUT_SEC) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+        with httpx.Client(timeout=_PER_SYMBOL_TIMEOUT_SEC, headers={"User-Agent": _UA}) as client:
+            resp = client.get(url)
+            resp.raise_for_status()
+            payload = resp.json()
         result = payload["chart"]["result"][0]
         ts = result.get("timestamp") or []
         quote = (result.get("indicators") or {}).get("quote") or [{}]
@@ -49,7 +43,7 @@ def _fetch_yahoo_chart(symbol: str, days: int) -> tuple[str, pd.DataFrame | None
 
 
 def fetch_history(symbols: list[str], days: int) -> dict[str, pd.DataFrame]:
-    uniq = list(dict.fromkeys(symbols))[:12]
+    uniq = list(dict.fromkeys(symbols))[:10]
     if not uniq:
         return {}
     days = min(int(days), 120)
@@ -69,6 +63,7 @@ def fetch_history(symbols: list[str], days: int) -> dict[str, pd.DataFrame]:
             log.warning("price batch timed out with %s/%s symbols", len(out), len(uniq))
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
+    log.info("Fetched prices for %s/%s symbols", len(out), len(uniq))
     return out
 
 
