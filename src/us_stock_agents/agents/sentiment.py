@@ -12,7 +12,7 @@ from us_stock_agents.config import AppConfig
 from us_stock_agents.models import NewsItem, SentimentReport
 
 log = logging.getLogger(__name__)
-_FEED_TIMEOUT_SEC = 12
+_FEED_TIMEOUT_SEC = 6
 
 
 class SentimentAgent:
@@ -65,7 +65,8 @@ class SentimentAgent:
 
     def _fetch_news(self) -> list[NewsItem]:
         out: list[NewsItem] = []
-        for url in self.cfg.news_feeds:
+        # Cap feeds so Railway cycles stay under wall timeout.
+        for url in list(self.cfg.news_feeds)[:2]:
             try:
                 req = urllib.request.Request(
                     url,
@@ -77,7 +78,7 @@ class SentimentAgent:
             except Exception as exc:  # noqa: BLE001
                 log.warning("RSS fetch failed for %s: %s", url, exc)
                 continue
-            for entry in parsed.entries[:40]:
+            for entry in parsed.entries[:25]:
                 title = getattr(entry, "title", "") or ""
                 summary = getattr(entry, "summary", "") or getattr(entry, "description", "") or ""
                 summary = re.sub(r"<[^>]+>", " ", summary)

@@ -21,7 +21,7 @@ def send_telegram(text: str) -> bool:
         resp = httpx.post(
             url,
             json={"chat_id": chat_id, "text": text[:4000], "disable_web_page_preview": True},
-            timeout=20,
+            timeout=8,
         )
         resp.raise_for_status()
         return True

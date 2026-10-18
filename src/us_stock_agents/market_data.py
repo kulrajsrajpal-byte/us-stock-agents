@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from datetime import datetime, timedelta, timezone
 import logging
 
@@ -9,56 +9,69 @@ import yfinance as yf
 
 log = logging.getLogger(__name__)
 
-_PER_SYMBOL_TIMEOUT_SEC = 12
-_BATCH_TIMEOUT_SEC = 35
-_MAX_WORKERS = 4
+_DOWNLOAD_TIMEOUT_SEC = 40
 
 
-def _fetch_one(symbol: str, start, end) -> tuple[str, pd.DataFrame | None]:
-    try:
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(start=start, end=end, auto_adjust=True)
-        if df.empty:
-            return symbol, None
-        return symbol, df.rename(columns=str.lower)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("yfinance failed for %s: %s", symbol, exc)
-        return symbol, None
+def _download_batch(symbols: list[str], start, end) -> dict[str, pd.DataFrame]:
+    out: dict[str, pd.DataFrame] = {}
+    if not symbols:
+        return out
+    # One network call for the whole watchlist.
+    data = yf.download(
+        tickers=" ".join(symbols),
+        start=start,
+        end=end,
+        auto_adjust=True,
+        progress=False,
+        threads=True,
+        group_by="ticker",
+    )
+    if data is None or data.empty:
+        return out
+
+    if len(symbols) == 1:
+        sym = symbols[0]
+        df = data.copy()
+        df.columns = [str(c).lower() for c in df.columns]
+        if "close" in df.columns:
+            out[sym] = df
+        return out
+
+    for sym in symbols:
+        try:
+            if sym not in data.columns.get_level_values(0):
+                continue
+            df = data[sym].copy()
+            df.columns = [str(c).lower() for c in df.columns]
+            if "close" in df.columns and not df["close"].dropna().empty:
+                out[sym] = df.dropna(how="all")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("parse failed for %s: %s", sym, exc)
+    return out
 
 
 def fetch_history(symbols: list[str], days: int) -> dict[str, pd.DataFrame]:
     end = datetime.now(timezone.utc)
-    # Cap lookback so Railway cycles stay under wall timeout.
-    days = min(int(days), 180)
-    start = (end - timedelta(days=days + 20)).date()
+    days = min(int(days), 120)
+    start = (end - timedelta(days=days + 15)).date()
     end_d = end.date()
-    out: dict[str, pd.DataFrame] = {}
-    uniq = list(dict.fromkeys(symbols))[:12]
+    uniq = list(dict.fromkeys(symbols))[:10]
     if not uniq:
-        return out
+        return {}
 
-    pool = ThreadPoolExecutor(max_workers=_MAX_WORKERS)
+    pool = ThreadPoolExecutor(max_workers=1)
     try:
-        futures = {pool.submit(_fetch_one, sym, start, end_d): sym for sym in uniq}
+        fut = pool.submit(_download_batch, uniq, start, end_d)
         try:
-            for fut in as_completed(futures, timeout=_BATCH_TIMEOUT_SEC):
-                sym = futures[fut]
-                try:
-                    symbol, df = fut.result(timeout=_PER_SYMBOL_TIMEOUT_SEC)
-                    if df is not None:
-                        out[symbol] = df
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("yfinance error for %s: %s", sym, exc)
+            return fut.result(timeout=_DOWNLOAD_TIMEOUT_SEC)
         except FuturesTimeout:
-            log.warning(
-                "yfinance batch timeout after %ss (%s/%s symbols)",
-                _BATCH_TIMEOUT_SEC,
-                len(out),
-                len(uniq),
-            )
+            log.warning("yfinance download timed out after %ss", _DOWNLOAD_TIMEOUT_SEC)
+            return {}
+        except Exception as exc:  # noqa: BLE001
+            log.warning("yfinance download failed: %s", exc)
+            return {}
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
-    return out
 
 
 def last_close(prices: dict[str, pd.DataFrame], symbol: str) -> float | None:
