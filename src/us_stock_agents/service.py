@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from typing import Any
 
 from us_stock_agents.config import load_config
@@ -19,7 +18,6 @@ from us_stock_agents.settings import get_settings
 
 log = logging.getLogger(__name__)
 _cycle_lock = threading.Lock()
-_CYCLE_WALL_TIMEOUT_SEC = 150
 
 
 def run_cycle(force: bool = False) -> dict[str, Any]:

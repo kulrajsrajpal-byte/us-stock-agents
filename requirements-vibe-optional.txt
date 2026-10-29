@@ -1,0 +1,10 @@
+# Optional — full HKUDS Vibe-Trading stack (LLM agent OS).
+# NOT installed on Railway by default (needs model API keys + heavy runtime).
+# Our Forever Agent already paper-trades + learns on Postgres without this.
+#
+# Local explore only:
+#   pip install -U -r requirements-vibe-optional.txt
+#   vibe-trading paper create
+#
+# Upstream: https://github.com/HKUDS/Vibe-Trading
+vibe-trading-ai>=0.1.18

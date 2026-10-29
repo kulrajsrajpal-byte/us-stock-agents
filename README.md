@@ -1,6 +1,10 @@
-# US Stock Multi-Agent (Railway 24/7)
+# US Stock Forever Agent (Railway 24/7)
 
-Four specialist agents + continuous paper trading that **mutates strategy parameters until a champion** hits your profit target.
+**One autonomous paper-trading agent** — scan → paper trade → store in Postgres → learn from mistakes → mutate → repeat until profit. No human in the loop. No live broker.
+
+See [`deploy/FOREVER-AGENT.md`](./deploy/FOREVER-AGENT.md). Optional Vibe-Trading explore: [`requirements-vibe-optional.txt`](./requirements-vibe-optional.txt) ([HKUDS/Vibe-Trading](https://github.com/HKUDS/Vibe-Trading)).
+
+Under the hood: specialist steps (sentiment/activity/backtest/paper) + local coach that **mutates until a champion** hits your profit target.
 
 ## Railway tools we use (from your catalog)
 

@@ -10,6 +10,7 @@ from fastapi import FastAPI, Header, HTTPException
 from sqlalchemy import desc, select
 
 from us_stock_agents.db import HermesAdviceRow, RunRow, StrategyRow, TradeRow, init_db, session_scope
+from us_stock_agents.forever_agent import get_forever_agent
 from us_stock_agents.hermes import hermes_status
 from us_stock_agents.local_coach import coach_status
 from us_stock_agents.service import run_cycle
@@ -22,10 +23,11 @@ scheduler = BackgroundScheduler()
 
 
 def _scheduled_job() -> None:
+    """Unattended Forever Agent tick — paper trade → learn → mutate."""
     try:
-        run_cycle(force=False)
+        get_forever_agent().run_once(force=False)
     except Exception:  # noqa: BLE001
-        log.exception("Scheduled cycle failed")
+        log.exception("ForeverAgent scheduled cycle failed")
 
 
 @asynccontextmanager
@@ -54,9 +56,9 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="US Stock Multi-Agent",
-    description="24/7 paper trading + strategy evolution on Railway",
-    version="0.3.7",
+    title="US Stock Forever Agent",
+    description="One autonomous 24/7 paper trader: test → learn → mutate until profit",
+    version="0.4.0",
     lifespan=lifespan,
 )
 
@@ -72,7 +74,8 @@ def health() -> dict[str, Any]:
     settings = get_settings()
     return {
         "status": "ok",
-        "version": "0.3.7",
+        "version": "0.4.0",
+        "agent": "forever_agent",
         "market_data": "stooq_cache_seed",
         "run_interval_minutes": settings.run_interval_minutes,
         "market_hours_only": settings.market_hours_only,
@@ -82,14 +85,24 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.get("/agent")
+def agent_info() -> dict[str, Any]:
+    """Forever Agent identity — the one unattended paper trader."""
+    return get_forever_agent().status()
+
+
 async def _run_with_budget(force: bool) -> dict[str, Any]:
     """Keep the event loop free so /health works while a cycle runs."""
     try:
-        return await asyncio.wait_for(asyncio.to_thread(run_cycle, force), timeout=90)
+        return await asyncio.wait_for(
+            asyncio.to_thread(get_forever_agent().run_once, force=force),
+            timeout=90,
+        )
     except TimeoutError:
         return {
             "skipped": True,
             "reason": "cycle_timeout",
+            "agent": "forever_agent",
             "coach": coach_status(),
             "hermes": hermes_status(),
         }
