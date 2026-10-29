@@ -96,7 +96,7 @@ async def _run_with_budget(force: bool) -> dict[str, Any]:
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(get_forever_agent().run_once, force=force),
-            timeout=90,
+            timeout=45,
         )
     except TimeoutError:
         return {
